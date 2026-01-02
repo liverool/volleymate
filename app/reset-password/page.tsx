@@ -1,8 +1,11 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "@/utils/supabase/client";
+const { createClient } = await import("@/utils/supabase/client");
+const supabase = createClient();
+
 
 export default function ResetPasswordPage() {
   const supabase = createClient();
