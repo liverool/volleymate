@@ -1,211 +1,142 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/utils/supabase/client";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default function LoginPage() {
-  const supabase = createClient();
   const router = useRouter();
 
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // Hvis du allerede er innlogget: send til /
+  // Ikke opprett Supabase på toppnivå. Lazy-load når vi trenger den.
+  async function getSupabase() {
+    const { createClient } = await import("@/utils/supabase/client");
+    return createClient();
+  }
+
   useEffect(() => {
     (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user) router.push("/");
-      setLoading(false);
+      try {
+        const supabase = await getSupabase();
+        if (!supabase) return;
+
+        const { data } = await supabase.auth.getSession();
+        if (data.session) router.replace("/");
+      } catch {
+        // ikke kræsje UI
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function submit() {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setMsg("");
     setBusy(true);
 
     try {
-      if (!email.trim() || !password.trim()) {
-        setMsg("Fyll inn e-post og passord.");
-        return;
-      }
+      const supabase = await getSupabase();
+      if (!supabase) throw new Error("Supabase er ikke tilgjengelig.");
 
-      if (mode === "register") {
-        const { error } = await supabase.auth.signUp({
-          email: email.trim(),
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
           password,
         });
-
-        if (error) {
-          setMsg(error.message);
-          return;
-        }
-
-        setMsg("Bruker opprettet ✅ Du kan nå logge inn.");
-        setMode("login");
-        return;
+        if (error) throw error;
+        router.replace("/");
+      } else {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (error) throw error;
+        setMsg("Bruker opprettet. Sjekk e-post hvis bekreftelse er på.");
       }
-
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-
-      if (error) {
-        setMsg(error.message);
-        return;
-      }
-
-      router.push("/");
+    } catch (err: any) {
+      setMsg(err?.message ?? "Noe gikk galt.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function signOut() {
-    setMsg("");
-    await supabase.auth.signOut();
-    setMsg("Logget ut.");
-  }
-
-  if (loading) return <div style={{ padding: 20 }}>Laster…</div>;
-
   return (
-    <div style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
-      <h1 style={{ fontSize: 28, fontWeight: 800 }}>Volleymate</h1>
-      <p style={{ marginTop: 6, opacity: 0.85 }}>
-        {mode === "login" ? "Logg inn for å finne makker" : "Registrer ny bruker"}
-      </p>
+    <main style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
+      <h1 style={{ fontSize: 28, marginBottom: 12 }}>
+        {mode === "login" ? "Logg inn" : "Registrer"}
+      </h1>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button
+          type="button"
           onClick={() => setMode("login")}
-          style={{
-            flex: 1,
-            padding: 10,
-            border: "1px solid #ddd",
-            borderRadius: 10,
-            fontWeight: 700,
-            opacity: mode === "login" ? 1 : 0.6,
-          }}
+          disabled={busy}
+          style={{ padding: 8, borderRadius: 10 }}
         >
-          Logg inn
+          Login
         </button>
         <button
+          type="button"
           onClick={() => setMode("register")}
-          style={{
-            flex: 1,
-            padding: 10,
-            border: "1px solid #ddd",
-            borderRadius: 10,
-            fontWeight: 700,
-            opacity: mode === "register" ? 1 : 0.6,
-          }}
+          disabled={busy}
+          style={{ padding: 8, borderRadius: 10 }}
         >
-          Registrer
+          Register
         </button>
       </div>
 
-      <div style={{ marginTop: 14 }}>
-        <label style={{ display: "block", fontWeight: 700 }}>E-post</label>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="deg@epost.no"
+      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          E-post
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+          />
+        </label>
+
+        <label style={{ display: "grid", gap: 6 }}>
+          Passord
+          <input
+            type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+          />
+        </label>
+
+        <button
+          type="submit"
+          disabled={busy}
           style={{
-            width: "100%",
             padding: 10,
-            marginTop: 6,
-            border: "1px solid #ddd",
             borderRadius: 10,
-          }}
-        />
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <label style={{ display: "block", fontWeight: 700 }}>Passord</label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Minst 6 tegn"
-          style={{
-            width: "100%",
-            padding: 10,
-            marginTop: 6,
-            border: "1px solid #ddd",
-            borderRadius: 10,
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-          }}
-        />
-      </div>
-
-      {/* ✅ NYTT: Glemt passord-lenke (kun i login-modus) */}
-      {mode === "login" ? (
-        <div style={{ marginTop: 10, textAlign: "right" }}>
-          <Link href="/forgot-password" style={{ fontSize: 13, fontWeight: 700, opacity: 0.8 }}>
-            Glemt passord?
-          </Link>
-        </div>
-      ) : null}
-
-      <button
-        onClick={submit}
-        disabled={busy}
-        style={{
-          width: "100%",
-          padding: 12,
-          marginTop: 14,
-          borderRadius: 12,
-          fontWeight: 800,
-          opacity: busy ? 0.7 : 1,
-        }}
-      >
-        {busy ? "Jobber…" : mode === "login" ? "Logg inn" : "Opprett bruker"}
-      </button>
-
-      <button
-        onClick={signOut}
-        style={{
-          width: "100%",
-          padding: 12,
-          marginTop: 10,
-          borderRadius: 12,
-          border: "1px solid #ddd",
-          background: "transparent",
-        }}
-      >
-        Logg ut (test)
-      </button>
-
-      {msg ? (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 10,
-            border: "1px solid #ddd",
-            borderRadius: 12,
+            border: "1px solid #111",
+            cursor: busy ? "not-allowed" : "pointer",
           }}
         >
-          {msg}
-        </div>
-      ) : null}
+          {busy ? "Jobber..." : mode === "login" ? "Logg inn" : "Opprett bruker"}
+        </button>
 
-      <p style={{ marginTop: 14, fontSize: 12, opacity: 0.75 }}>
-        Tips: Hvis du er innlogget sendes du automatisk videre.
+        {msg ? <p>{msg}</p> : null}
+      </form>
+
+      <p style={{ marginTop: 12 }}>
+        <a href="/forgot-password">Glemt passord?</a>
       </p>
-    </div>
+    </main>
   );
 }
