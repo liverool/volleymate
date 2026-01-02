@@ -1,18 +1,20 @@
 import { createBrowserClient } from "@supabase/ssr";
 
+// Next bruker denne under build
+const IS_BUILD =
+  process.env.NEXT_PHASE === "phase-production-build";
+
 export function createClient() {
-  // ⚠️ Viktig: Under build / prerender finnes ikke window
-  if (typeof window === "undefined") {
-    // Returner en "dummy" – brukes aldri, men hindrer crash
+  // 🚫 Under build: ikke lag Supabase i det hele tatt
+  if (IS_BUILD || typeof window === "undefined") {
     return null as any;
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
-  // ❗ IKKE kast feil her – build må aldri kræsje
   if (!url || !key) {
-    console.warn("Supabase env vars mangler i browser");
+    console.warn("Supabase env mangler i runtime");
     return null as any;
   }
 
