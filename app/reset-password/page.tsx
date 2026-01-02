@@ -1,14 +1,11 @@
 "use client";
+
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-const { createClient } = await import("@/utils/supabase/client");
-const supabase = createClient();
-
 
 export default function ResetPasswordPage() {
-  const supabase = createClient();
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -21,12 +18,24 @@ export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
 
+  // Lazy: lag supabase kun i browser/runtime
+  const supabasePromise = useMemo(async () => {
+    const { createClient } = await import("@/utils/supabase/client");
+    return createClient();
+  }, []);
+
   // Exchange code->session (når man kommer fra e-post)
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
+        const supabase = await supabasePromise;
+        if (!supabase) {
+          setMsg("Teknisk feil: Supabase er ikke tilgjengelig.");
+          return;
+        }
+
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) {
@@ -41,7 +50,7 @@ export default function ResetPasswordPage() {
     return () => {
       cancelled = true;
     };
-  }, [code, supabase]);
+  }, [code, supabasePromise]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,23 +66,26 @@ export default function ResetPasswordPage() {
     }
 
     setBusy(true);
-    const { error } = await supabase.auth.updateUser({ password });
 
-    if (error) {
+    try {
+      const supabase = await supabasePromise;
+      if (!supabase) throw new Error("Supabase er ikke tilgjengelig.");
+
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+
+      setMsg("Passord oppdatert. Sender deg til innlogging…");
+
+      await supabase.auth.signOut();
+
+      setTimeout(() => {
+        router.push("/login?reset=success");
+      }, 1200);
+    } catch {
       setMsg("Kunne ikke oppdatere passord. Prøv igjen.");
+    } finally {
       setBusy(false);
-      return;
     }
-
-    setMsg("Passord oppdatert. Sender deg til innlogging…");
-    setBusy(false);
-
-    // Valgfritt: logg ut før login (mange liker dette)
-    await supabase.auth.signOut();
-
-    setTimeout(() => {
-      router.push("/login?reset=success");
-    }, 1200);
   }
 
   if (loading) {
