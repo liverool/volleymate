@@ -1,87 +1,72 @@
 "use client";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 import { useState } from "react";
-import Link from "next/link";
-import { createClient } from "@/utils/supabase/client";
+
+export const dynamic = "force-dynamic";
 
 export default function ForgotPasswordPage() {
-  const supabase = createClient();
-
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true);
     setMsg(null);
+    setBusy(true);
 
-    const redirectTo = `${window.location.origin}/reset-password`;
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo,
-    });
+    try {
+      // Viktig: lazy import (IKKE import supabase i toppen av fila)
+      const { createClient } = await import("@/utils/supabase/client");
+      const supabase = createClient();
 
-    // Av sikkerhetsgrunner: alltid samme svar, også ved error.
-    if (error) {
-      setMsg(
-        "Hvis e-posten finnes, er det sendt en lenke for å sette nytt passord. Sjekk også søppelpost."
-      );
-    } else {
-      setMsg(
-        "Hvis e-posten finnes, er det sendt en lenke for å sette nytt passord. Sjekk også søppelpost."
-      );
+      const redirectTo = `${window.location.origin}/reset-password`;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
+
+      if (error) throw error;
+
+      setMsg("Sjekk e-posten din for reset-lenke (og spam).");
+    } catch (err: any) {
+      setMsg(err?.message ?? "Noe gikk galt.");
+    } finally {
+      setBusy(false);
     }
-
-    setBusy(false);
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
-      <h1 style={{ fontSize: 28, marginBottom: 16 }}>Glemt passord</h1>
+    <main style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
+      <h1 style={{ fontSize: 28, marginBottom: 12 }}>Glemt passord</h1>
 
-      <form onSubmit={onSubmit}>
-        <label style={{ display: "block", marginBottom: 6 }}>E-post</label>
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="deg@epost.no"
-          style={{
-            width: "100%",
-            padding: 12,
-            borderRadius: 8,
-            marginBottom: 12,
-            border: "1px solid #ccc",
-          }}
-        />
+      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+        <label style={{ display: "grid", gap: 6 }}>
+          E-post
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+          />
+        </label>
 
         <button
           type="submit"
           disabled={busy}
           style={{
-            width: "100%",
-            padding: 12,
-            borderRadius: 8,
-            border: "none",
+            padding: 10,
+            borderRadius: 10,
+            border: "1px solid #111",
             cursor: busy ? "not-allowed" : "pointer",
           }}
         >
-          {busy ? "Sender…" : "Send reset-lenke"}
+          {busy ? "Sender..." : "Send reset-lenke"}
         </button>
+
+        {msg ? <p style={{ marginTop: 6 }}>{msg}</p> : null}
       </form>
-
-      {msg && (
-        <p style={{ marginTop: 16, lineHeight: 1.4 }}>
-          {msg}
-        </p>
-      )}
-
-      <p style={{ marginTop: 20 }}>
-        <Link href="/login">Tilbake til innlogging</Link>
-      </p>
-    </div>
+    </main>
   );
 }
