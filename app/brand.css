@@ -1,0 +1,18 @@
+:root {
+  --vm-bg: #0b1220;
+  --vm-surface: #111b2e;
+  --vm-text: #eaf0ff;
+  --vm-muted: rgba(234, 240, 255, 0.7);
+  --vm-border: rgba(234, 240, 255, 0.14);
+
+  --vm-primary: #3b82f6;
+  --vm-accent: #f97316;
+
+  --vm-surface-2: rgba(234, 240, 255, 0.04);
+  --vm-accent-soft: rgba(249, 115, 22, 0.10);
+  --vm-primary-text: #071426;
+
+  --vm-radius-sm: 10px;
+  --vm-radius-md: 12px;
+  --vm-radius-lg: 16px;
+}
