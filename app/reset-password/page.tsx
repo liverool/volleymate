@@ -2,14 +2,11 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
-  const sp = useSearchParams();
-
-  const code = sp.get("code");
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -18,19 +15,28 @@ export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
 
-  // Lazy: lag supabase kun i browser/runtime
-  const supabasePromise = useMemo(async () => {
-    const { createClient } = await import("@/utils/supabase/client");
-    return createClient();
-  }, []);
+  // Hold på en promise til supabase-client (ingen top-level import)
+  const supabasePromiseRef = useRef<Promise<any> | null>(null);
 
-  // Exchange code->session (når man kommer fra e-post)
+  function getSupabase() {
+    if (!supabasePromiseRef.current) {
+      supabasePromiseRef.current = (async () => {
+        const { createClient } = await import("@/utils/supabase/client");
+        return createClient();
+      })();
+    }
+    return supabasePromiseRef.current;
+  }
+
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        const supabase = await supabasePromise;
+        // Hent code fra URL kun i browser
+        const code = new URLSearchParams(window.location.search).get("code");
+
+        const supabase = await getSupabase();
         if (!supabase) {
           setMsg("Teknisk feil: Supabase er ikke tilgjengelig.");
           return;
@@ -50,7 +56,7 @@ export default function ResetPasswordPage() {
     return () => {
       cancelled = true;
     };
-  }, [code, supabasePromise]);
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -68,7 +74,7 @@ export default function ResetPasswordPage() {
     setBusy(true);
 
     try {
-      const supabase = await supabasePromise;
+      const supabase = await getSupabase();
       if (!supabase) throw new Error("Supabase er ikke tilgjengelig.");
 
       const { error } = await supabase.auth.updateUser({ password });
