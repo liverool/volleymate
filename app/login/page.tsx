@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/utils/supabase/client";
 
 export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
   const router = useRouter();
+  const supabase = createClient();
 
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -16,21 +18,15 @@ export default function LoginPage() {
   const [msg, setMsg] = useState<string>("");
   const [msgType, setMsgType] = useState<"info" | "error" | "success">("info");
 
-  // Ikke opprett Supabase på toppnivå. Lazy-load når vi trenger den.
-  async function getSupabase() {
-    const { createClient } = await import("@/utils/supabase/client");
-    return createClient();
-  }
-
   function setMessage(type: "info" | "error" | "success", text: string) {
     setMsgType(type);
     setMsg(text);
   }
 
+  // Hvis allerede innlogget: send til /
   useEffect(() => {
     (async () => {
       try {
-        const supabase = await getSupabase();
         const { data } = await supabase.auth.getSession();
         if (data.session) router.replace("/");
       } catch {
@@ -46,10 +42,6 @@ export default function LoginPage() {
     setBusy(true);
 
     try {
-      const supabase = await getSupabase();
-      const origin =
-        typeof window !== "undefined" ? window.location.origin : "";
-
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -57,16 +49,15 @@ export default function LoginPage() {
         });
 
         if (error) {
-          // Vanlig UX: Bruker forsøker å logge inn før e-post er bekreftet
           const m = (error.message || "").toLowerCase();
           if (
             m.includes("email not confirmed") ||
-            m.includes("confirm") ||
-            m.includes("not confirmed")
+            m.includes("not confirmed") ||
+            m.includes("confirm")
           ) {
             setMessage(
               "info",
-              `E-posten er ikke bekreftet ennå. Sjekk innboksen din (${email}). Hvis du vil, kan du sende bekreftelsesmail på nytt under.`
+              `E-posten er ikke bekreftet ennå. Sjekk innboksen din (${email}). Du kan sende bekreftelsesmail på nytt under.`
             );
             return;
           }
@@ -78,18 +69,19 @@ export default function LoginPage() {
       }
 
       // REGISTER
+      const origin = window.location.origin;
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          // Viktig: sørger for at bekreftelseslinken går til riktig miljø (prod/dev)
-          emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
+          emailRedirectTo: `${origin}/auth/callback`,
         },
       });
 
       if (error) throw error;
 
-      // Hvis email confirmation er på (vanlig): session = null -> brukeren skal bekrefte via e-post
+      // Vanlig når e-postbekreftelse er på: session=null
       if (!data.session) {
         setMessage(
           "success",
@@ -100,7 +92,7 @@ export default function LoginPage() {
         return;
       }
 
-      // Hvis confirmation er av: session finnes -> send videre
+      // Hvis confirmation er av og session finnes:
       router.replace("/");
     } catch (err: any) {
       setMessage("error", err?.message ?? "Noe gikk galt.");
@@ -110,11 +102,15 @@ export default function LoginPage() {
   }
 
   async function resendConfirmation() {
+    if (!email) {
+      setMessage("error", "Skriv inn e-post først.");
+      return;
+    }
+
     setBusy(true);
     setMsg("");
 
     try {
-      const supabase = await getSupabase();
       const origin = window.location.origin;
 
       const { error } = await supabase.auth.resend({
@@ -229,8 +225,7 @@ export default function LoginPage() {
           >
             <p style={{ margin: 0 }}>{msg}</p>
 
-            {/* Hvis vi er i login-modus og bruker ikke er bekreftet ennå: gi knapp for resend */}
-            {mode === "login" && msgType === "info" && email ? (
+            {mode === "login" && msgType === "info" ? (
               <button
                 type="button"
                 onClick={resendConfirmation}
