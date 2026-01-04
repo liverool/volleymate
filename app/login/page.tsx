@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-
 export default function LoginPage() {
   const router = useRouter();
 
@@ -14,7 +13,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
 
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [msg, setMsg] = useState<string>("");
+  const [msgType, setMsgType] = useState<"info" | "error" | "success">("info");
 
   // Ikke opprett Supabase på toppnivå. Lazy-load når vi trenger den.
   async function getSupabase() {
@@ -22,16 +22,19 @@ export default function LoginPage() {
     return createClient();
   }
 
+  function setMessage(type: "info" | "error" | "success", text: string) {
+    setMsgType(type);
+    setMsg(text);
+  }
+
   useEffect(() => {
     (async () => {
       try {
         const supabase = await getSupabase();
-        if (!supabase) return;
-
         const { data } = await supabase.auth.getSession();
         if (data.session) router.replace("/");
       } catch {
-        // ikke kræsje UI
+        // Ikke kræsje UI
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -44,25 +47,92 @@ export default function LoginPage() {
 
     try {
       const supabase = await getSupabase();
-      if (!supabase) throw new Error("Supabase er ikke tilgjengelig.");
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
 
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (error) throw error;
+
+        if (error) {
+          // Vanlig UX: Bruker forsøker å logge inn før e-post er bekreftet
+          const m = (error.message || "").toLowerCase();
+          if (
+            m.includes("email not confirmed") ||
+            m.includes("confirm") ||
+            m.includes("not confirmed")
+          ) {
+            setMessage(
+              "info",
+              `E-posten er ikke bekreftet ennå. Sjekk innboksen din (${email}). Hvis du vil, kan du sende bekreftelsesmail på nytt under.`
+            );
+            return;
+          }
+          throw error;
+        }
+
         router.replace("/");
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (error) throw error;
-        setMsg("Bruker opprettet. Sjekk e-post hvis bekreftelse er på.");
+        return;
       }
+
+      // REGISTER
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          // Viktig: sørger for at bekreftelseslinken går til riktig miljø (prod/dev)
+          emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
+        },
+      });
+
+      if (error) throw error;
+
+      // Hvis email confirmation er på (vanlig): session = null -> brukeren skal bekrefte via e-post
+      if (!data.session) {
+        setMessage(
+          "success",
+          `Bruker opprettet! Sjekk e-posten (${email}) og bekreft kontoen. Deretter kan du logge inn.`
+        );
+        setMode("login");
+        setPassword("");
+        return;
+      }
+
+      // Hvis confirmation er av: session finnes -> send videre
+      router.replace("/");
     } catch (err: any) {
-      setMsg(err?.message ?? "Noe gikk galt.");
+      setMessage("error", err?.message ?? "Noe gikk galt.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendConfirmation() {
+    setBusy(true);
+    setMsg("");
+
+    try {
+      const supabase = await getSupabase();
+      const origin = window.location.origin;
+
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: {
+          emailRedirectTo: `${origin}/auth/callback`,
+        },
+      });
+
+      if (error) throw error;
+
+      setMessage(
+        "success",
+        `Sendt! Sjekk e-posten (${email}) for bekreftelseslink.`
+      );
+    } catch (err: any) {
+      setMessage("error", err?.message ?? "Kunne ikke sende e-post på nytt.");
     } finally {
       setBusy(false);
     }
@@ -77,17 +147,34 @@ export default function LoginPage() {
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button
           type="button"
-          onClick={() => setMode("login")}
+          onClick={() => {
+            setMode("login");
+            setMsg("");
+          }}
           disabled={busy}
-          style={{ padding: 8, borderRadius: 10 }}
+          style={{
+            padding: 8,
+            borderRadius: 10,
+            border: "1px solid #ccc",
+            background: mode === "login" ? "#f2f2f2" : "transparent",
+          }}
         >
           Login
         </button>
+
         <button
           type="button"
-          onClick={() => setMode("register")}
+          onClick={() => {
+            setMode("register");
+            setMsg("");
+          }}
           disabled={busy}
-          style={{ padding: 8, borderRadius: 10 }}
+          style={{
+            padding: 8,
+            borderRadius: 10,
+            border: "1px solid #ccc",
+            background: mode === "register" ? "#f2f2f2" : "transparent",
+          }}
         >
           Register
         </button>
@@ -100,7 +187,7 @@ export default function LoginPage() {
             type="email"
             required
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => setEmail(e.target.value.trim())}
             autoComplete="email"
             style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
           />
@@ -131,7 +218,35 @@ export default function LoginPage() {
           {busy ? "Jobber..." : mode === "login" ? "Logg inn" : "Opprett bruker"}
         </button>
 
-        {msg ? <p>{msg}</p> : null}
+        {msg ? (
+          <div
+            style={{
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid #ddd",
+              lineHeight: 1.4,
+            }}
+          >
+            <p style={{ margin: 0 }}>{msg}</p>
+
+            {/* Hvis vi er i login-modus og bruker ikke er bekreftet ennå: gi knapp for resend */}
+            {mode === "login" && msgType === "info" && email ? (
+              <button
+                type="button"
+                onClick={resendConfirmation}
+                disabled={busy}
+                style={{
+                  marginTop: 10,
+                  padding: 8,
+                  borderRadius: 10,
+                  border: "1px solid #ccc",
+                }}
+              >
+                Send bekreftelsesmail på nytt
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </form>
 
       <p style={{ marginTop: 12 }}>
