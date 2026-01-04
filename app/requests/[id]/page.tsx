@@ -9,23 +9,17 @@ type RequestRow = {
   id: string;
   user_id: string | null;
   created_at: string | null;
-
   municipality: string | null;
   location_text: string | null;
-
   start_time: string | null;
   duration_minutes: number | null;
-
   level_min: number | null;
   level_max: number | null;
-
   type: string | null;
   notes: string | null;
-
   status: string | null;
 };
 
-// request_interests har IKKE id hos deg -> bruk request_id + user_id (composite)
 type InterestRow = {
   request_id: string;
   user_id: string;
@@ -34,17 +28,12 @@ type InterestRow = {
 
 function fmtDate(iso: string | null) {
   if (!iso) return "";
-  try {
-    return new Date(iso).toLocaleString("no-NO", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso ?? "";
-  }
+  return new Date(iso).toLocaleString("no-NO", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function RequestDetailsPage() {
@@ -59,14 +48,10 @@ export default function RequestDetailsPage() {
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string>("");
+  const [msg, setMsg] = useState("");
 
   const [userId, setUserId] = useState<string | null>(null);
   const [row, setRow] = useState<RequestRow | null>(null);
-
-  const [interestCount, setInterestCount] = useState<number>(0);
-  const [iAmInterested, setIAmInterested] = useState<boolean>(false);
-
   const [interests, setInterests] = useState<InterestRow[]>([]);
   const [matchIdForMe, setMatchIdForMe] = useState<string | null>(null);
 
@@ -78,112 +63,47 @@ export default function RequestDetailsPage() {
     setLoading(true);
     setMsg("");
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    const uid = user?.id ?? null;
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth?.user?.id ?? null;
     setUserId(uid);
 
-    // 1) Load request
     const { data: req, error: reqErr } = await supabase
       .from("requests")
-      .select(
-        `
-        id,
-        user_id,
-        created_at,
-        municipality,
-        location_text,
-        start_time,
-        duration_minutes,
-        level_min,
-        level_max,
-        type,
-        notes,
-        status
-      `
-      )
+      .select("*")
       .eq("id", id)
       .single();
 
     if (reqErr) {
-      setRow(null);
+      setMsg(reqErr.message);
       setLoading(false);
-      setMsg(`Kunne ikke laste request: ${reqErr.message}`);
       return;
     }
 
-    const requestRow = req as RequestRow;
-    setRow(requestRow);
+    setRow(req as RequestRow);
 
-    // 2) Interest count
-    const { count, error: countErr } = await supabase
-      .from("request_interests")
-      .select("*", { count: "exact", head: true })
-      .eq("request_id", id);
-
-    if (!countErr) setInterestCount(count ?? 0);
-
-    // 3) Check if current user is interested
-    if (uid) {
-      const { data: mine, error: mineErr } = await supabase
-        .from("request_interests")
-        .select("user_id")
-        .eq("request_id", id)
-        .eq("user_id", uid)
-        .maybeSingle();
-
-      setIAmInterested(!mineErr && !!mine);
-    } else {
-      setIAmInterested(false);
-    }
-
-    // 4) For eier: hent interesser (uten id)
-    if (uid && requestRow.user_id && uid === requestRow.user_id) {
-      const { data: iData, error: iErr } = await supabase
+    if (uid && req.user_id === uid) {
+      const { data } = await supabase
         .from("request_interests")
         .select("request_id, user_id, created_at")
         .eq("request_id", id)
         .order("created_at", { ascending: false });
 
-      if (iErr) {
-        setInterests([]);
-        setMsg((prev) => prev || `Kunne ikke laste interesser: ${iErr.message}`);
-      } else {
-        setInterests((iData ?? []) as InterestRow[]);
-      }
+      setInterests((data ?? []) as InterestRow[]);
     } else {
       setInterests([]);
     }
 
-    // 5) Finn match for meg (så interessent får "Åpne chat" når eier har godkjent)
-    if (uid && requestRow.user_id) {
-      const ownerId = requestRow.user_id;
-
-      const { data: m1 } = await supabase
+    if (uid && req.user_id) {
+      const { data } = await supabase
         .from("matches")
         .select("id")
         .eq("request_id", id)
-        .eq("owner_user_id", ownerId)
-        .eq("interested_user_id", uid)
+        .or(
+          `and(owner_user_id.eq.${uid},interested_user_id.eq.${req.user_id}),and(owner_user_id.eq.${req.user_id},interested_user_id.eq.${uid})`
+        )
         .maybeSingle();
 
-      if ((m1 as any)?.id) {
-        setMatchIdForMe((m1 as any).id as string);
-      } else {
-        // fallback (hvis dere tidligere byttet rundt feltene)
-        const { data: m2 } = await supabase
-          .from("matches")
-          .select("id")
-          .eq("request_id", id)
-          .eq("owner_user_id", uid)
-          .eq("interested_user_id", ownerId)
-          .maybeSingle();
-
-        setMatchIdForMe(((m2 as any)?.id as string) ?? null);
-      }
-    } else {
-      setMatchIdForMe(null);
+      setMatchIdForMe((data as any)?.id ?? null);
     }
 
     setLoading(false);
@@ -194,137 +114,48 @@ export default function RequestDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function addInterest() {
-    if (!userId) {
-      router.push("/login");
-      return;
-    }
-    if (!id) return;
-
-    setBusy(true);
-    setMsg("");
-
-    const { error } = await supabase.from("request_interests").insert({
-      request_id: id,
-      user_id: userId,
-    });
-
-    if (error) {
-      setMsg(`Kunne ikke lagre interesse: ${error.message}`);
-      setBusy(false);
-      return;
-    }
-
-    await loadAll();
-    setMsg("Interesse lagret. Eier må godkjenne før chat åpnes.");
-    setBusy(false);
-  }
-
-  async function removeInterest() {
-    if (!userId || !id) return;
-
-    setBusy(true);
-    setMsg("");
-
-    const { error } = await supabase
-      .from("request_interests")
-      .delete()
-      .eq("request_id", id)
-      .eq("user_id", userId);
-
-    if (error) {
-      setMsg(`Kunne ikke trekke interesse: ${error.message}`);
-      setBusy(false);
-      return;
-    }
-
-    await loadAll();
-    setMsg("Interesse fjernet.");
-    setBusy(false);
-  }
-
-  async function closeRequest() {
-    if (!isOwner || !id) return;
-
-    setBusy(true);
-    setMsg("");
-
-    const { error } = await supabase
-      .from("requests")
-      .update({ status: "closed" })
-      .eq("id", id);
-
-    if (error) {
-      setMsg(`Kunne ikke lukke request: ${error.message}`);
-      setBusy(false);
-      return;
-    }
-
-    await loadAll();
-    setMsg("Request lukket.");
-    setBusy(false);
-  }
-
   async function approveInterest(interestedUserId: string) {
-    if (!row?.user_id || !id) return;
-    if (!isOwner) return;
+    try {
+      if (!isOwner || !row?.user_id || !id) {
+        setMsg("Mangler rettigheter eller data.");
+        return;
+      }
 
-    setBusy(true);
-    setMsg("");
+      setBusy(true);
+      setMsg("Godkjenner interesse…");
 
-    const ownerId = row.user_id;
+      const { data: created, error } = await supabase
+        .from("matches")
+        .insert({
+          request_id: id,
+          owner_user_id: row.user_id,
+          interested_user_id: interestedUserId,
+        })
+        .select("id")
+        .single();
 
-    // Sjekk om match allerede finnes
-    const { data: existing, error: exErr } = await supabase
-      .from("matches")
-      .select("id")
-      .eq("request_id", id)
-      .eq("owner_user_id", ownerId)
-      .eq("interested_user_id", interestedUserId)
-      .maybeSingle();
+      if (error) {
+        setMsg(`Kunne ikke opprette match: ${error.message}`);
+        return;
+      }
 
-    if (exErr) {
-      setMsg(`Kunne ikke sjekke eksisterende match: ${exErr.message}`);
+      const matchId = (created as any)?.id;
+      if (!matchId) {
+        setMsg("Match opprettet, men fikk ikke ID (RLS på SELECT?).");
+        return;
+      }
+
+      router.push(`/matches/${matchId}/chat`);
+    } catch (e: any) {
+      setMsg(`Feil: ${e?.message ?? e}`);
+    } finally {
       setBusy(false);
-      return;
     }
-
-    const existingId = (existing as any)?.id as string | undefined;
-    if (existingId) {
-      router.push(`/matches/${existingId}/chat`);
-      return;
-    }
-
-    // Opprett match
-    const { data: created, error: insErr } = await supabase
-      .from("matches")
-      .insert({
-        request_id: id,
-        owner_user_id: ownerId,
-        interested_user_id: interestedUserId,
-      })
-      .select("id")
-      .single();
-
-    if (insErr) {
-      setMsg(`Kunne ikke opprette match: ${insErr.message}`);
-      setBusy(false);
-      return;
-    }
-
-    const newId = (created as any)?.id as string | undefined;
-    if (!newId) {
-      setMsg("Opprettet match, men fikk ikke id tilbake.");
-      setBusy(false);
-      return;
-    }
-
-    router.push(`/matches/${newId}/chat`);
   }
 
-  // Slett interesse-rad for en bruker (composite key)
   async function rejectInterest(interestedUserId: string) {
     if (!isOwner || !id) return;
+
     setBusy(true);
     setMsg("");
 
@@ -335,328 +166,113 @@ export default function RequestDetailsPage() {
       .eq("user_id", interestedUserId);
 
     if (error) {
-      setMsg(`Kunne ikke fjerne interesse: ${error.message}`);
-      setBusy(false);
-      return;
+      setMsg(error.message);
+    } else {
+      setMsg("Interesse fjernet.");
+      await loadAll();
     }
 
-    await loadAll();
-    setMsg("Interesse fjernet.");
     setBusy(false);
   }
 
-  async function cleanupChildrenBeforeDelete(requestId: string) {
-    await supabase.from("request_interests").delete().eq("request_id", requestId);
-
-    try {
-      const { data: matches } = await supabase
-        .from("matches")
-        .select("id")
-        .eq("request_id", requestId);
-
-      const matchIds = (matches ?? []).map((m: any) => m.id).filter(Boolean);
-
-      if (matchIds.length > 0) {
-        await supabase.from("match_reads").delete().in("match_id", matchIds);
-      }
-
-      await supabase.from("matches").delete().eq("request_id", requestId);
-    } catch {
-      // ignore
-    }
-  }
-
-  async function deleteRequest() {
-    if (!isOwner || !id) return;
-
-    const ok = confirm("Slette denne forespørselen permanent?");
-    if (!ok) return;
-
-    setBusy(true);
-    setMsg("");
-
-    let { error } = await supabase.from("requests").delete().eq("id", id);
-
-    if (error) {
-      await cleanupChildrenBeforeDelete(id);
-      const retry = await supabase.from("requests").delete().eq("id", id);
-      error = retry.error ?? null;
-    }
-
-    if (error) {
-      setMsg(
-        `Kunne ikke slette. Hvis feilen handler om "foreign key", må vi legge inn ON DELETE CASCADE eller utvide cleanup.\n\n${error.message}`
-      );
-      setBusy(false);
-      return;
-    }
-
-    router.push("/requests");
-  }
-
   if (loading) {
-    return (
-      <div style={{ maxWidth: 900, margin: "40px auto", padding: 16 }}>
-        Laster…
-      </div>
-    );
+    return <div style={{ padding: 20 }}>Laster…</div>;
   }
 
   if (!row) {
-    return (
-      <div style={{ maxWidth: 900, margin: "40px auto", padding: 16 }}>
-        <p>Request ikke funnet.</p>
-        <p style={{ marginTop: 12 }}>
-          <Link href="/requests">← Tilbake</Link>
-        </p>
-        {msg ? <pre style={{ whiteSpace: "pre-wrap" }}>{msg}</pre> : null}
-      </div>
-    );
+    return <div style={{ padding: 20 }}>Request ikke funnet.</div>;
   }
 
   return (
     <div style={{ maxWidth: 900, margin: "40px auto", padding: 16 }}>
-      <p style={{ marginBottom: 10 }}>
-        <Link href="/requests">← Tilbake</Link>
+      <Link href="/requests">← Tilbake</Link>
+
+      <h1 style={{ fontSize: 28, marginTop: 10 }}>Request</h1>
+
+      <p>
+        <strong>{row.municipality}</strong>
+        {row.start_time ? ` · ${fmtDate(row.start_time)}` : ""}
       </p>
 
-      <h1 style={{ fontSize: 32, marginBottom: 10 }}>Request</h1>
+      {matchIdForMe && (
+        <Link
+          href={`/matches/${matchIdForMe}/chat`}
+          style={{
+            display: "inline-block",
+            marginTop: 10,
+            padding: "10px 14px",
+            border: "1px solid #111",
+            borderRadius: 10,
+            textDecoration: "none",
+          }}
+        >
+          Åpne chat
+        </Link>
+      )}
 
-      <div
-        style={{
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ marginBottom: 8 }}>
-          <strong>{row.municipality ?? "Ukjent kommune"}</strong>
-        </div>
-
-        {row.location_text ? <div style={{ marginBottom: 8 }}>{row.location_text}</div> : null}
-
-        {row.start_time ? (
-          <div style={{ marginBottom: 8, opacity: 0.8 }}>
-            {fmtDate(row.start_time)}
-            {row.duration_minutes ? ` • ${row.duration_minutes} min` : ""}
-          </div>
-        ) : null}
-
-        {(row.level_min != null || row.level_max != null) && (
-          <div style={{ marginBottom: 8, opacity: 0.85 }}>
-            Nivå: {row.level_min ?? "?"} – {row.level_max ?? "?"}
-          </div>
-        )}
-
-        {row.type ? <div style={{ marginBottom: 8, opacity: 0.85 }}>Type: {row.type}</div> : null}
-
-        {row.notes ? (
-          <div style={{ marginBottom: 8 }}>
-            <strong>Notater:</strong>
-            <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{row.notes}</div>
-          </div>
-        ) : null}
-
-        <div style={{ opacity: 0.8 }}>
-          Status: <strong>{row.status ?? "?"}</strong> • Interessert:{" "}
-          <strong>{interestCount}</strong>
-        </div>
-
-        {matchIdForMe ? (
-          <div style={{ marginTop: 10 }}>
-            <Link
-              href={`/matches/${matchIdForMe}/chat`}
-              style={{
-                display: "inline-block",
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #111",
-                textDecoration: "none",
-              }}
-            >
-              Åpne chat
-            </Link>
-          </div>
-        ) : null}
-      </div>
-
-      {msg ? (
+      {msg && (
         <pre
           style={{
-            whiteSpace: "pre-wrap",
+            marginTop: 14,
+            padding: 12,
             background: "#111",
             color: "#ddd",
-            padding: 12,
             borderRadius: 10,
-            border: "1px solid #333",
-            marginBottom: 14,
             fontSize: 12,
           }}
         >
           {msg}
         </pre>
-      ) : null}
+      )}
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {!userId ? (
-          <Link
-            href="/login"
-            style={{
-              padding: "10px 12px",
-              border: "1px solid #ddd",
-              borderRadius: 10,
-              textDecoration: "none",
-            }}
-          >
-            Logg inn for å melde interesse
-          </Link>
-        ) : isClosed ? (
-          <span style={{ opacity: 0.7 }}>Denne requesten er lukket.</span>
-        ) : iAmInterested ? (
-          <button
-            disabled={busy}
-            onClick={removeInterest}
-            style={{
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #999",
-              background: "transparent",
-              cursor: busy ? "not-allowed" : "pointer",
-            }}
-          >
-            {busy ? "Jobber…" : "Trekk interesse"}
-          </button>
-        ) : (
-          <button
-            disabled={busy}
-            onClick={addInterest}
-            style={{
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #111",
-              cursor: busy ? "not-allowed" : "pointer",
-            }}
-          >
-            {busy ? "Jobber…" : "Jeg kan spille"}
-          </button>
-        )}
-
-        {isOwner && (
-          <>
-            {!isClosed && (
-              <button
-                disabled={busy}
-                onClick={closeRequest}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #666",
-                  background: "transparent",
-                  cursor: busy ? "not-allowed" : "pointer",
-                }}
-              >
-                {busy ? "Jobber…" : "Lukk request"}
-              </button>
-            )}
-
-            <button
-              disabled={busy}
-              onClick={deleteRequest}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #c00",
-                background: "transparent",
-                cursor: busy ? "not-allowed" : "pointer",
-              }}
-            >
-              {busy ? "Sletter…" : "Slett request"}
-            </button>
-          </>
-        )}
-      </div>
-
-      {isOwner ? (
-        <div style={{ marginTop: 22 }}>
-          <h2 style={{ fontSize: 18, marginBottom: 10 }}>Interesser</h2>
+      {isOwner && (
+        <div style={{ marginTop: 24 }}>
+          <h2>Interesser</h2>
 
           {interests.length === 0 ? (
-            <div
-              style={{
-                border: "1px dashed #999",
-                borderRadius: 12,
-                padding: 14,
-                opacity: 0.8,
-              }}
-            >
-              Ingen har meldt interesse ennå.
-            </div>
+            <p>Ingen interesser ennå.</p>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {interests.map((i) => (
-                <div
-                  key={i.user_id}
-                  style={{
-                    border: "1px solid #ddd",
-                    borderRadius: 12,
-                    padding: 12,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 800 }}>User</div>
-                    <div style={{ fontSize: 13, opacity: 0.85, wordBreak: "break-all" }}>
-                      {i.user_id}
-                    </div>
-                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-                      {i.created_at ? fmtDate(i.created_at) : ""}
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <button
-                      disabled={busy || isClosed}
-                      onClick={() => approveInterest(i.user_id)}
-                      style={{
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #111",
-                        cursor: busy ? "not-allowed" : "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {busy ? "Jobber…" : "Godkjenn → Chat"}
-                    </button>
-
-                    <button
-                      disabled={busy}
-                      onClick={() => rejectInterest(i.user_id)}
-                      style={{
-                        padding: "10px 12px",
-                        borderRadius: 10,
-                        border: "1px solid #c00",
-                        background: "transparent",
-                        cursor: busy ? "not-allowed" : "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Fjern
-                    </button>
+            interests.map((i) => (
+              <div
+                key={i.user_id}
+                style={{
+                  border: "1px solid #333",
+                  borderRadius: 10,
+                  padding: 12,
+                  marginBottom: 10,
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 700 }}>{i.user_id}</div>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>
+                    {fmtDate(i.created_at)}
                   </div>
                 </div>
-              ))}
-            </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    disabled={busy || isClosed}
+                    onClick={() => approveInterest(i.user_id)}
+                  >
+                    Godkjenn → Chat
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => rejectInterest(i.user_id)}
+                  >
+                    Fjern
+                  </button>
+                </div>
+              </div>
+            ))
           )}
         </div>
-      ) : null}
-
-      <div style={{ marginTop: 18, opacity: 0.7, fontSize: 12 }}>
-        Tips: Hvis “Godkjenn → Chat” feiler, er det nesten alltid RLS på <code>matches</code> som blokkerer insert.
-      </div>
+      )}
     </div>
   );
 }
