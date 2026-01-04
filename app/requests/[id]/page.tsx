@@ -25,8 +25,8 @@ type RequestRow = {
   status: string | null;
 };
 
+// request_interests har IKKE id hos deg -> bruk request_id + user_id (composite)
 type InterestRow = {
-  id: string;
   request_id: string;
   user_id: string;
   created_at: string | null;
@@ -67,7 +67,6 @@ export default function RequestDetailsPage() {
   const [interestCount, setInterestCount] = useState<number>(0);
   const [iAmInterested, setIAmInterested] = useState<boolean>(false);
 
-  // NYTT:
   const [interests, setInterests] = useState<InterestRow[]>([]);
   const [matchIdForMe, setMatchIdForMe] = useState<string | null>(null);
 
@@ -79,7 +78,6 @@ export default function RequestDetailsPage() {
     setLoading(true);
     setMsg("");
 
-    // Hent bruker
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -118,7 +116,7 @@ export default function RequestDetailsPage() {
     const requestRow = req as RequestRow;
     setRow(requestRow);
 
-    // 2) Interest count (robust)
+    // 2) Interest count
     const { count, error: countErr } = await supabase
       .from("request_interests")
       .select("*", { count: "exact", head: true })
@@ -130,7 +128,7 @@ export default function RequestDetailsPage() {
     if (uid) {
       const { data: mine, error: mineErr } = await supabase
         .from("request_interests")
-        .select("id")
+        .select("user_id")
         .eq("request_id", id)
         .eq("user_id", uid)
         .maybeSingle();
@@ -140,12 +138,11 @@ export default function RequestDetailsPage() {
       setIAmInterested(false);
     }
 
-    // 4) For eier: hent liste over interesser (vis hvem som har meldt seg)
-    // (ingen join – kun user_id; du kan senere join’e mot profiles)
+    // 4) For eier: hent interesser (uten id)
     if (uid && requestRow.user_id && uid === requestRow.user_id) {
       const { data: iData, error: iErr } = await supabase
         .from("request_interests")
-        .select("id, request_id, user_id, created_at")
+        .select("request_id, user_id, created_at")
         .eq("request_id", id)
         .order("created_at", { ascending: false });
 
@@ -159,12 +156,10 @@ export default function RequestDetailsPage() {
       setInterests([]);
     }
 
-    // 5) Finn match for meg (om den allerede er opprettet)
-    // Dette gjør at den som meldte interesse kan se "Åpne chat" når eier har godkjent.
+    // 5) Finn match for meg (så interessent får "Åpne chat" når eier har godkjent)
     if (uid && requestRow.user_id) {
       const ownerId = requestRow.user_id;
 
-      // match: owner_user_id=ownerId, interested_user_id=uid, request_id=id
       const { data: m1 } = await supabase
         .from("matches")
         .select("id")
@@ -173,10 +168,10 @@ export default function RequestDetailsPage() {
         .eq("interested_user_id", uid)
         .maybeSingle();
 
-      if (m1?.id) {
-        setMatchIdForMe(m1.id);
+      if ((m1 as any)?.id) {
+        setMatchIdForMe((m1 as any).id as string);
       } else {
-        // (valgfritt) også sjekk motsatt vei hvis du har brukt motsatt felt tidligere
+        // fallback (hvis dere tidligere byttet rundt feltene)
         const { data: m2 } = await supabase
           .from("matches")
           .select("id")
@@ -185,7 +180,7 @@ export default function RequestDetailsPage() {
           .eq("interested_user_id", ownerId)
           .maybeSingle();
 
-        setMatchIdForMe(m2?.id ?? null);
+        setMatchIdForMe(((m2 as any)?.id as string) ?? null);
       }
     } else {
       setMatchIdForMe(null);
@@ -270,7 +265,6 @@ export default function RequestDetailsPage() {
     setBusy(false);
   }
 
-  // NYTT: Eier godkjenner en interessent -> opprett match -> gå til chat
   async function approveInterest(interestedUserId: string) {
     if (!row?.user_id || !id) return;
     if (!isOwner) return;
@@ -280,7 +274,7 @@ export default function RequestDetailsPage() {
 
     const ownerId = row.user_id;
 
-    // Finn om match allerede finnes
+    // Sjekk om match allerede finnes
     const { data: existing, error: exErr } = await supabase
       .from("matches")
       .select("id")
@@ -325,19 +319,20 @@ export default function RequestDetailsPage() {
       return;
     }
 
-    // Valgfritt: lukk request automatisk når match er laget
-    // await supabase.from("requests").update({ status: "closed" }).eq("id", id);
-
     router.push(`/matches/${newId}/chat`);
   }
 
-  // Eier kan "avvise" ved å slette interesse-raden
-  async function rejectInterest(interestId: string) {
-    if (!isOwner) return;
+  // Slett interesse-rad for en bruker (composite key)
+  async function rejectInterest(interestedUserId: string) {
+    if (!isOwner || !id) return;
     setBusy(true);
     setMsg("");
 
-    const { error } = await supabase.from("request_interests").delete().eq("id", interestId);
+    const { error } = await supabase
+      .from("request_interests")
+      .delete()
+      .eq("request_id", id)
+      .eq("user_id", interestedUserId);
 
     if (error) {
       setMsg(`Kunne ikke fjerne interesse: ${error.message}`);
@@ -350,7 +345,6 @@ export default function RequestDetailsPage() {
     setBusy(false);
   }
 
-  // Best effort cleanup ved delete (din originale)
   async function cleanupChildrenBeforeDelete(requestId: string) {
     await supabase.from("request_interests").delete().eq("request_id", requestId);
 
@@ -469,7 +463,6 @@ export default function RequestDetailsPage() {
           <strong>{interestCount}</strong>
         </div>
 
-        {/* NYTT: Hvis match finnes for meg, vis chatlenke */}
         {matchIdForMe ? (
           <div style={{ marginTop: 10 }}>
             <Link
@@ -505,7 +498,6 @@ export default function RequestDetailsPage() {
         </pre>
       ) : null}
 
-      {/* Actions */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {!userId ? (
           <Link
@@ -585,7 +577,6 @@ export default function RequestDetailsPage() {
         )}
       </div>
 
-      {/* NYTT: Eier-panel for interesser */}
       {isOwner ? (
         <div style={{ marginTop: 22 }}>
           <h2 style={{ fontSize: 18, marginBottom: 10 }}>Interesser</h2>
@@ -605,7 +596,7 @@ export default function RequestDetailsPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {interests.map((i) => (
                 <div
-                  key={i.id}
+                  key={i.user_id}
                   style={{
                     border: "1px solid #ddd",
                     borderRadius: 12,
@@ -643,7 +634,7 @@ export default function RequestDetailsPage() {
 
                     <button
                       disabled={busy}
-                      onClick={() => rejectInterest(i.id)}
+                      onClick={() => rejectInterest(i.user_id)}
                       style={{
                         padding: "10px 12px",
                         borderRadius: 10,
@@ -664,7 +655,7 @@ export default function RequestDetailsPage() {
       ) : null}
 
       <div style={{ marginTop: 18, opacity: 0.7, fontSize: 12 }}>
-        Tips: Hvis slette feiler pga “foreign key”, si hva feilmeldingen er, så lager vi riktig ON DELETE CASCADE.
+        Tips: Hvis “Godkjenn → Chat” feiler, er det nesten alltid RLS på <code>matches</code> som blokkerer insert.
       </div>
     </div>
   );
