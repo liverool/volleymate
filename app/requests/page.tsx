@@ -86,35 +86,42 @@ export default function RequestsPage() {
 
     setMeId(user.id);
 
+    // ✅ Viktig: hold select enkel for å unngå 400 ved “kolonne finnes ikke”
+    const baseSelect =
+      "id,user_id,created_at,municipality,location_text,start_time,duration_minutes,level_min,level_max,type,notes,status";
+
+    // Mine
     const mineRes = await supabase
       .from("requests")
-      .select(
-        "id,user_id,created_at,municipality,location_text,start_time,duration_minutes,level_min,level_max,type,notes,status"
-      )
+      .select(baseSelect)
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (mineRes.error) {
-      setMsg((m) => m || mineRes.error!.message);
+      setMsg((m) => m || `Mine requests: ${mineRes.error!.message}`);
       setMyRows([]);
     } else {
       setMyRows((mineRes.data as RequestRow[]) ?? []);
     }
 
+    // Åpne (ikke mine)
+    // ✅ Ikke bruk `.not("status","in", ...)` — det kan gi 400 i PostgREST.
+    // Vi henter bare alt som ikke er mine, og filtrerer "done/cancelled" i JS.
     const openRes = await supabase
       .from("requests")
-      .select(
-        "id,user_id,created_at,municipality,location_text,start_time,duration_minutes,level_min,level_max,type,notes,status"
-      )
+      .select(baseSelect)
       .neq("user_id", user.id)
-      .not("status", "in", '("done","cancelled")')
       .order("created_at", { ascending: false });
 
     if (openRes.error) {
-      setMsg((m) => m || openRes.error!.message);
+      setMsg((m) => m || `Åpne requests: ${openRes.error!.message}`);
       setOpenRows([]);
     } else {
-      setOpenRows((openRes.data as RequestRow[]) ?? []);
+      const all = ((openRes.data as RequestRow[]) ?? []).filter((r) => {
+        const s = (r.status ?? "").toLowerCase();
+        return s !== "done" && s !== "cancelled";
+      });
+      setOpenRows(all);
     }
 
     setLoading(false);
