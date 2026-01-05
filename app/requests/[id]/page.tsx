@@ -34,6 +34,7 @@ type InterestRow = {
 type MatchRow = {
   id: string;
   request_id: string | null;
+  requester_id: string | null;
   created_at: string | null;
 };
 
@@ -57,106 +58,107 @@ export default function RequestDetailsPage() {
   }, [params]);
 
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const [meId, setMeId] = useState<string | null>(null);
   const [request, setRequest] = useState<RequestRow | null>(null);
   const [interests, setInterests] = useState<InterestRow[]>([]);
   const [existingMatch, setExistingMatch] = useState<MatchRow | null>(null);
 
-  const [meId, setMeId] = useState<string | null>(null);
-
-  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string>("");
-  const [debugClicks, setDebugClicks] = useState(false); // slå på hvis du vil ha alert("klikk")
-
-  useEffect(() => {
-    let alive = true;
-
-    (async () => {
-      setLoading(true);
-      setMsg("");
-
-      if (!requestId) {
-        setMsg("Mangler request-id i URL.");
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const {
-          data: { user },
-          error: userErr,
-        } = await supabase.auth.getUser();
-
-        if (userErr) console.warn("auth.getUser error:", userErr);
-        if (!alive) return;
-
-        setMeId(user?.id ?? null);
-
-        // 1) request
-        const { data: req, error: reqErr } = await supabase
-          .from("requests")
-          .select("*")
-          .eq("id", requestId)
-          .maybeSingle();
-
-        if (reqErr) {
-          console.error("Fetch request error:", reqErr);
-          setMsg(`Kunne ikke hente request: ${reqErr.message}`);
-        }
-        if (!alive) return;
-
-        setRequest((req as any) ?? null);
-
-        // 2) interests
-        const { data: ints, error: intErr } = await supabase
-          .from("request_interests")
-          .select("request_id,user_id,created_at")
-          .eq("request_id", requestId)
-          .order("created_at", { ascending: false });
-
-        if (intErr) {
-          console.error("Fetch interests error:", intErr);
-          setMsg((m) => m || `Kunne ikke hente interesser: ${intErr.message}`);
-        }
-        if (!alive) return;
-
-        setInterests((ints as any) ?? []);
-
-        // 3) eksisterende match for request (hvis den finnes)
-        const { data: m, error: mErr } = await supabase
-          .from("matches")
-          .select("id,request_id,created_at")
-          .eq("request_id", requestId)
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        if (mErr) {
-          console.warn("Fetch existing match error:", mErr);
-          // Ikke blokker UI av dette
-        }
-        if (!alive) return;
-
-        setExistingMatch((m?.[0] as any) ?? null);
-      } catch (e: any) {
-        console.error("Load error:", e);
-        setMsg(`Uventet feil: ${e?.message ?? String(e)}`);
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, [requestId, supabase]);
+  const [debugAlerts, setDebugAlerts] = useState(false);
 
   const isOwner = useMemo(() => {
     if (!meId || !request?.user_id) return false;
     return meId === request.user_id;
   }, [meId, request?.user_id]);
 
+  async function loadAll() {
+    setLoading(true);
+    setMsg("");
+
+    if (!requestId) {
+      setMsg("Mangler request-id i URL.");
+      setLoading(false);
+      return;
+    }
+
+    // 1) hvem er jeg
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+
+    if (userErr) console.warn("auth.getUser error:", userErr);
+    setMeId(user?.id ?? null);
+
+    // 2) hent request
+    const { data: req, error: reqErr } = await supabase
+      .from("requests")
+      .select("*")
+      .eq("id", requestId)
+      .maybeSingle();
+
+    if (reqErr) {
+      console.error("Fetch request error:", reqErr);
+      setMsg(`Kunne ikke hente request: ${reqErr.message}`);
+    }
+
+    setRequest((req as any) ?? null);
+
+    // 3) hent interesser
+    const { data: ints, error: intErr } = await supabase
+      .from("request_interests")
+      .select("request_id,user_id,created_at")
+      .eq("request_id", requestId)
+      .order("created_at", { ascending: false });
+
+    if (intErr) {
+      console.error("Fetch interests error:", intErr);
+      setMsg((m) => m || `Kunne ikke hente interesser: ${intErr.message}`);
+    }
+
+    setInterests((ints as any) ?? []);
+
+    // 4) hent eksisterende match (hvis finnes)
+    const { data: m, error: mErr } = await supabase
+      .from("matches")
+      .select("id,request_id,requester_id,created_at")
+      .eq("request_id", requestId)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (mErr) {
+      console.warn("Fetch existing match error:", mErr);
+      // ikke blokker siden
+    }
+
+    setExistingMatch((m?.[0] as any) ?? null);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await loadAll();
+      } catch (e: any) {
+        if (!alive) return;
+        console.error("Load error:", e);
+        setMsg(`Uventet feil: ${e?.message ?? String(e)}`);
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestId]);
+
   async function approveInterest(interestUserId: string) {
-    // SUPER tydelig logging for å se hvor det stopper
     console.log("approveInterest() START", { requestId, interestUserId, meId });
+    if (debugAlerts) alert("KLIKK: Godkjenn");
 
     setMsg("");
     setBusy(true);
@@ -164,63 +166,60 @@ export default function RequestDetailsPage() {
     try {
       if (!requestId) {
         setMsg("Mangler requestId.");
-        console.log("approveInterest() STOP: missing requestId");
         return;
       }
       if (!meId) {
         setMsg("Du må være innlogget.");
-        console.log("approveInterest() STOP: missing meId");
         return;
       }
-
-      // Sikkerhetscheck: bare eier skal kunne godkjenne
+      if (!request) {
+        setMsg("Request ikke lastet.");
+        return;
+      }
       if (!isOwner) {
         setMsg("Du er ikke eier av denne requesten.");
-        console.log("approveInterest() STOP: not owner");
         return;
       }
 
-      // Hvis match finnes allerede -> åpne den
+      // Hvis match finnes allerede: gå direkte til chat
       if (existingMatch?.id) {
-        console.log("approveInterest(): match exists, redirecting", existingMatch.id);
+        console.log("approveInterest(): match exists -> redirect", existingMatch.id);
         router.push(`/matches/${existingMatch.id}/chat`);
         return;
       }
 
-      // 1) Lag match
-      // NB: Vi antar at matches har minst { request_id }. Hvis du har andre required felter,
-      // vil Supabase returnere error – som vi nå viser tydelig.
+      // INSERT: matches krever requester_id (NOT NULL)
+      // requester_id = eier (deg), dvs auth.uid()
+      // request_id = requestId
       const insertPayload: any = {
         request_id: requestId,
+        requester_id: meId,
       };
 
-      console.log("approveInterest(): inserting match payload", insertPayload);
+      console.log("approveInterest(): inserting matches payload", insertPayload);
 
       const { data: match, error: matchErr } = await supabase
         .from("matches")
         .insert(insertPayload)
-        .select("id,request_id,created_at")
+        .select("id,request_id,requester_id,created_at")
         .single();
 
       if (matchErr) {
         console.error("approveInterest(): INSERT matches error", matchErr);
         setMsg(
-          `Kunne ikke opprette match (trolig RLS eller required fields). ` +
-            `Feil: ${matchErr.message}`
+          `Kunne ikke opprette match. ` +
+            `Feil: ${matchErr.message}` +
+            (matchErr.details ? `\nDetails: ${matchErr.details}` : "")
         );
         return;
       }
 
       console.log("approveInterest(): match created", match);
-
-      // Oppdater local state så “Åpne chat” blir aktiv umiddelbart
       setExistingMatch(match as any);
 
-      // 2) Redirect til chat
       const matchId = (match as any)?.id;
       if (!matchId) {
         setMsg("Match ble opprettet, men mangler id i respons.");
-        console.log("approveInterest(): STOP missing matchId", match);
         return;
       }
 
@@ -237,10 +236,11 @@ export default function RequestDetailsPage() {
 
   function openChat() {
     console.log("openChat() clicked", { existingMatchId: existingMatch?.id });
-    setMsg("");
+    if (debugAlerts) alert("KLIKK: Åpne chat");
 
+    setMsg("");
     if (!existingMatch?.id) {
-      setMsg("Ingen chat/match funnet for denne requesten ennå.");
+      setMsg("Ingen chat/match finnes for denne requesten ennå.");
       return;
     }
     router.push(`/matches/${existingMatch.id}/chat`);
@@ -258,12 +258,10 @@ export default function RequestDetailsPage() {
     return (
       <div className="p-6 space-y-4">
         <h1 className="text-xl font-semibold">Request</h1>
-        <div className="text-sm opacity-80">
-          Fant ikke request (eller du har ikke tilgang).
-        </div>
-        {msg ? (
-          <div className="rounded-lg border p-3 text-sm">{msg}</div>
-        ) : null}
+        <div className="text-sm opacity-80">Fant ikke request (eller ingen tilgang).</div>
+
+        {msg ? <div className="rounded-lg border p-3 text-sm whitespace-pre-wrap">{msg}</div> : null}
+
         <Link className="underline text-sm" href="/requests">
           Tilbake til requests
         </Link>
@@ -273,7 +271,7 @@ export default function RequestDetailsPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Topplinje */}
+      {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Request</h1>
@@ -288,7 +286,6 @@ export default function RequestDetailsPage() {
             onPointerDown={() => console.log("POINTERDOWN: Åpne chat")}
             onClick={() => {
               console.log("CLICK: Åpne chat");
-              if (debugClicks) alert("klikk: Åpne chat");
               openChat();
             }}
             disabled={busy}
@@ -297,26 +294,25 @@ export default function RequestDetailsPage() {
             Åpne chat
           </button>
 
-          <Link
-            href="/requests"
-            className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
-          >
+          <Link href="/requests" className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5">
             Tilbake
           </Link>
         </div>
       </div>
 
-      {/* Debug kontroll */}
+      {/* Debug */}
       <div className="flex items-center gap-2 text-sm">
         <input
-          id="debugClicks"
+          id="debugAlerts"
           type="checkbox"
-          checked={debugClicks}
-          onChange={(e) => setDebugClicks(e.target.checked)}
+          checked={debugAlerts}
+          onChange={(e) => setDebugAlerts(e.target.checked)}
         />
-        <label htmlFor="debugClicks" className="opacity-80">
-          Debug: bruk alert() på klikk
+        <label htmlFor="debugAlerts" className="opacity-80">
+          Debug: alert() på klikk
         </label>
+        <span className="opacity-60">• eier: {String(isOwner)}</span>
+        <span className="opacity-60">• match: {existingMatch?.id ? existingMatch.id : "ingen"}</span>
       </div>
 
       {msg ? (
@@ -326,23 +322,20 @@ export default function RequestDetailsPage() {
         </div>
       ) : null}
 
-      {/* Request detaljer */}
+      {/* Request details */}
       <div className="rounded-xl border p-4 space-y-2">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
           <div>
-            <span className="opacity-70">Kommune:</span>{" "}
-            {request.municipality ?? "-"}
+            <span className="opacity-70">Kommune:</span> {request.municipality ?? "-"}
           </div>
           <div>
-            <span className="opacity-70">Sted:</span>{" "}
-            {request.location_text ?? "-"}
+            <span className="opacity-70">Sted:</span> {request.location_text ?? "-"}
           </div>
           <div>
             <span className="opacity-70">Start:</span> {fmt(request.start_time)}
           </div>
           <div>
-            <span className="opacity-70">Varighet:</span>{" "}
-            {request.duration_minutes ?? "-"} min
+            <span className="opacity-70">Varighet:</span> {request.duration_minutes ?? "-"} min
           </div>
           <div>
             <span className="opacity-70">Nivå:</span>{" "}
@@ -361,15 +354,11 @@ export default function RequestDetailsPage() {
         ) : null}
       </div>
 
-      {/* Interesser */}
+      {/* Interests */}
       <div className="rounded-xl border p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Interesser</h2>
-
-          <div className="text-sm opacity-70">
-            {isOwner ? "Du er eier" : "Du er ikke eier"}
-            {existingMatch?.id ? ` • Match finnes (${existingMatch.id})` : ""}
-          </div>
+          <div className="text-sm opacity-70">{isOwner ? "Du er eier" : "Kun eier kan godkjenne"}</div>
         </div>
 
         {interests.length === 0 ? (
@@ -390,12 +379,9 @@ export default function RequestDetailsPage() {
                   {isOwner ? (
                     <button
                       type="button"
-                      onPointerDown={() =>
-                        console.log("POINTERDOWN: Godkjenn", i.user_id)
-                      }
+                      onPointerDown={() => console.log("POINTERDOWN: Godkjenn", i.user_id)}
                       onClick={() => {
                         console.log("CLICK: Godkjenn", i.user_id);
-                        if (debugClicks) alert("klikk: Godkjenn");
                         approveInterest(i.user_id);
                       }}
                       disabled={busy}
@@ -412,18 +398,18 @@ export default function RequestDetailsPage() {
           </div>
         )}
 
-        {/* Ekstra: tydelig knapp som alltid kan teste klikk */}
+        {/* Test-knapp */}
         <div className="pt-2">
           <button
             type="button"
-            onPointerDown={() => console.log("POINTERDOWN: TEST-KNAPP")}
+            onPointerDown={() => console.log("POINTERDOWN: TEST")}
             onClick={() => {
-              console.log("CLICK: TEST-KNAPP (skal alltid trigge)");
+              console.log("CLICK: TEST (skal alltid trigge)");
               alert("TEST: klikk registrert ✅");
             }}
             className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
           >
-            TEST: Klikk meg (skal alltid gi alert)
+            TEST: Klikk meg
           </button>
         </div>
       </div>
