@@ -11,6 +11,7 @@ export default function LoginPage() {
   const supabase = createClient();
 
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [displayName, setDisplayName] = useState(""); // ✅ NY
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -71,15 +72,41 @@ export default function LoginPage() {
       // REGISTER
       const origin = window.location.origin;
 
+      const dn = displayName.trim();
+      if (!dn) {
+        setMessage("error", "Skriv inn navn.");
+        return;
+      }
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           emailRedirectTo: `${origin}/auth/callback`,
+          data: {
+            display_name: dn, // ✅ lagres i auth metadata (triggeren vår kan plukke den opp)
+          },
         },
       });
 
       if (error) throw error;
+
+      // ✅ Forsøk å oppdatere profiles direkte (trygt, men ikke kritisk)
+      // signUp returnerer data.user selv om session kan være null.
+      if (data.user?.id) {
+        const { error: profErr } = await supabase
+          .from("profiles")
+          .upsert(
+            { user_id: data.user.id, display_name: dn },
+            { onConflict: "user_id" }
+          );
+
+        // Ikke stopp flyten om dette feiler (RLS/latency osv). Trigger/backfill dekker.
+        if (profErr) {
+          // Bare logg i console for debug, ikke skrem brukeren.
+          console.warn("profiles upsert failed:", profErr.message);
+        }
+      }
 
       // Vanlig når e-postbekreftelse er på: session=null
       if (!data.session) {
@@ -89,6 +116,8 @@ export default function LoginPage() {
         );
         setMode("login");
         setPassword("");
+        // behold displayName? jeg ville nullstilt:
+        setDisplayName("");
         return;
       }
 
@@ -123,10 +152,7 @@ export default function LoginPage() {
 
       if (error) throw error;
 
-      setMessage(
-        "success",
-        `Sendt! Sjekk e-posten (${email}) for bekreftelseslink.`
-      );
+      setMessage("success", `Sendt! Sjekk e-posten (${email}) for bekreftelseslink.`);
     } catch (err: any) {
       setMessage("error", err?.message ?? "Kunne ikke sende e-post på nytt.");
     } finally {
@@ -177,6 +203,22 @@ export default function LoginPage() {
       </div>
 
       <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+        {/* ✅ NYTT: Navn (kun register) */}
+        {mode === "register" ? (
+          <label style={{ display: "grid", gap: 6 }}>
+            Navn
+            <input
+              type="text"
+              required
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              autoComplete="name"
+              placeholder="F.eks. Jan Roger"
+              style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+            />
+          </label>
+        ) : null}
+
         <label style={{ display: "grid", gap: 6 }}>
           E-post
           <input
