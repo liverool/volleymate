@@ -63,6 +63,7 @@ export default function RequestDetailsPage() {
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [busyDelete, setBusyDelete] = useState(false);
 
   const [meId, setMeId] = useState<string | null>(null);
   const [request, setRequest] = useState<RequestRow | null>(null);
@@ -184,6 +185,36 @@ export default function RequestDetailsPage() {
     router.push(`/matches/${existingMatch.id}/chat`);
   }
 
+  async function deleteRequest() {
+    setMsg("");
+    if (!request?.id) return;
+    if (!meId) return setMsg("Du må være innlogget.");
+    if (!isOwner) return setMsg("Du er ikke eier av denne requesten.");
+
+    // ✅ Valgfritt, men trygt: ikke slett hvis match finnes
+    if (existingMatch?.id) {
+      return setMsg("Denne requesten har allerede en match/chat. Sletting er blokkert for å unngå å ødelegge flyten.");
+    }
+
+    const ok = confirm("Er du sikker på at du vil slette denne requesten?");
+    if (!ok) return;
+
+    setBusyDelete(true);
+    try {
+      const { error } = await supabase.from("requests").delete().eq("id", request.id);
+
+      if (error) {
+        setMsg(`Kunne ikke slette request: ${error.message}`);
+        return;
+      }
+
+      router.push("/requests");
+      router.refresh();
+    } finally {
+      setBusyDelete(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-6">
@@ -216,6 +247,19 @@ export default function RequestDetailsPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* ✅ SLETT: kun eier */}
+          {isOwner ? (
+            <button
+              type="button"
+              onClick={deleteRequest}
+              disabled={busy || busyDelete}
+              className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+              title={existingMatch?.id ? "Kan ikke slette når match/chat finnes" : "Slett request"}
+            >
+              {busyDelete ? "Sletter…" : "Slett"}
+            </button>
+          ) : null}
+
           <button
             type="button"
             onClick={openChat}
@@ -224,6 +268,7 @@ export default function RequestDetailsPage() {
           >
             Åpne chat
           </button>
+
           <Link href="/requests" className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5">
             Tilbake
           </Link>
