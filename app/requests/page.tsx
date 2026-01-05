@@ -27,6 +27,11 @@ type RequestRow = {
   status: string | null;
 };
 
+type ProfileMini = {
+  user_id: string;
+  display_name: string | null;
+};
+
 function fmt(iso: string | null) {
   if (!iso) return "";
   try {
@@ -42,6 +47,12 @@ function shortId(id: string | null | undefined) {
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
 }
 
+function chunk<T>(arr: T[], size: number) {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 export default function RequestsPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -51,6 +62,8 @@ export default function RequestsPage() {
 
   const [openRows, setOpenRows] = useState<RequestRow[]>([]);
   const [myRows, setMyRows] = useState<RequestRow[]>([]);
+
+  const [nameByUserId, setNameByUserId] = useState<Record<string, string>>({});
 
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -68,6 +81,40 @@ export default function RequestsPage() {
     } catch {
       // ignore
     }
+  }
+
+  async function loadProfilesForUserIds(userIds: string[]) {
+    if (userIds.length === 0) return;
+
+    // Unik + fjern tomme
+    const uniq = Array.from(new Set(userIds.filter(Boolean)));
+
+    // Supabase/PostgREST kan ha grenser på IN-lengde; chunker for safety.
+    const batches = chunk(uniq, 100);
+
+    const merged: Record<string, string> = {};
+
+    for (const ids of batches) {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("user_id,display_name")
+        .in("user_id", ids);
+
+      if (error) {
+        // Ikke ødelegg sida – bare fallback til shortId
+        setMsg((m) => m || `Kunne ikke hente navn (profiles): ${error.message}`);
+        continue;
+      }
+
+      const rows = (data as ProfileMini[]) ?? [];
+      for (const p of rows) {
+        const name = (p.display_name ?? "").trim();
+        if (p.user_id && name) merged[p.user_id] = name;
+      }
+    }
+
+    // Merge inn i state
+    setNameByUserId((prev) => ({ ...prev, ...merged }));
   }
 
   async function loadAll() {
@@ -103,32 +150,40 @@ export default function RequestsPage() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
+    let mineRows: RequestRow[] = [];
     if (mineRes.error) {
       setMsg((m) => m || `Mine requests: ${mineRes.error!.message}`);
       setMyRows([]);
     } else {
-      setMyRows((mineRes.data as RequestRow[]) ?? []);
+      mineRows = (mineRes.data as RequestRow[]) ?? [];
+      setMyRows(mineRows);
     }
 
     // Åpne (ikke mine)
-    // ✅ Ikke bruk `.not("status","in", ...)` — det kan gi 400 i PostgREST.
-    // Vi henter bare alt som ikke er mine, og filtrerer "done/cancelled" i JS.
     const openRes = await supabase
       .from("requests")
       .select(baseSelect)
       .neq("user_id", user.id)
       .order("created_at", { ascending: false });
 
+    let openFiltered: RequestRow[] = [];
     if (openRes.error) {
       setMsg((m) => m || `Åpne requests: ${openRes.error!.message}`);
       setOpenRows([]);
     } else {
-      const all = ((openRes.data as RequestRow[]) ?? []).filter((r) => {
+      openFiltered = ((openRes.data as RequestRow[]) ?? []).filter((r) => {
         const s = (r.status ?? "").toLowerCase();
         return s !== "done" && s !== "cancelled";
       });
-      setOpenRows(all);
+      setOpenRows(openFiltered);
     }
+
+    // 🔎 Hent navn for alle user_id vi viser
+    const idsToFetch = [
+      ...openFiltered.map((r) => r.user_id || ""),
+      ...mineRows.map((r) => r.user_id || ""),
+    ];
+    await loadProfilesForUserIds(idsToFetch);
 
     setLoading(false);
   }
@@ -160,11 +215,7 @@ export default function RequestsPage() {
     setMsg("");
     setBusyId(id);
 
-    const { error } = await supabase
-      .from("requests")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", meId);
+    const { error } = await supabase.from("requests").delete().eq("id", id).eq("user_id", meId);
 
     if (error) {
       setMsg(`Kunne ikke slette: ${error.message}`);
@@ -176,14 +227,18 @@ export default function RequestsPage() {
     setBusyId(null);
   }
 
+  function ownerLabel(userId: string | null) {
+    if (!userId) return "Ukjent";
+    if (meId && userId === meId) return "DEG";
+    return nameByUserId[userId] ?? shortId(userId);
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Requests</h1>
-          <div className="text-sm opacity-70">
-            Åpne = meld interesse • Mine = administrer dine
-          </div>
+          <div className="text-sm opacity-70">Åpne = meld interesse • Mine = administrer dine</div>
         </div>
 
         <Link
@@ -240,10 +295,7 @@ export default function RequestsPage() {
                       {r.location_text ? ` • ${r.location_text}` : ""}
                     </div>
 
-                    <div className="text-sm opacity-70">
-                      Opprettet av:{" "}
-                      {r.user_id && meId && r.user_id === meId ? "Deg" : shortId(r.user_id)}
-                    </div>
+                    <div className="text-sm opacity-70">Opprettet av: {ownerLabel(r.user_id)}</div>
 
                     <div className="text-sm opacity-70">
                       Start: {fmt(r.start_time) || "-"} • Varighet: {r.duration_minutes ?? "-"} min
@@ -253,6 +305,7 @@ export default function RequestsPage() {
                       {r.type ?? "-"}
                     </div>
                   </div>
+
                   <div className="text-right">
                     <div className="text-sm font-medium">{r.status ?? "—"}</div>
                     <div className="text-xs opacity-60">{fmt(r.created_at)}</div>
@@ -283,10 +336,7 @@ export default function RequestsPage() {
                       {r.location_text ? ` • ${r.location_text}` : ""}
                     </div>
 
-                    <div className="text-sm opacity-70">
-                      Opprettet av:{" "}
-                      {r.user_id && meId && r.user_id === meId ? "Deg" : shortId(r.user_id)}
-                    </div>
+                    <div className="text-sm opacity-70">Opprettet av: DEG</div>
 
                     <div className="text-sm opacity-70">
                       Start: {fmt(r.start_time) || "-"} • Varighet: {r.duration_minutes ?? "-"} min
@@ -296,6 +346,7 @@ export default function RequestsPage() {
                       {r.type ?? "-"}
                     </div>
                   </div>
+
                   <div className="text-right">
                     <div className="text-sm font-medium">{r.status ?? "—"}</div>
                     <div className="text-xs opacity-60">{fmt(r.created_at)}</div>
