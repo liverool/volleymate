@@ -1,22 +1,27 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
 
 type RequestRow = {
   id: string;
   user_id: string | null;
   created_at: string | null;
+
   municipality: string | null;
   location_text: string | null;
+
   start_time: string | null;
   duration_minutes: number | null;
+
   level_min: number | null;
   level_max: number | null;
+
   type: string | null;
   notes: string | null;
+
   status: string | null;
 };
 
@@ -26,14 +31,19 @@ type InterestRow = {
   created_at: string | null;
 };
 
-function fmtDate(iso: string | null) {
+type MatchRow = {
+  id: string;
+  request_id: string | null;
+  created_at: string | null;
+};
+
+function fmt(iso: string | null) {
   if (!iso) return "";
-  return new Date(iso).toLocaleString("no-NO", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  try {
+    return new Date(iso).toLocaleString("no-NO");
+  } catch {
+    return iso ?? "";
+  }
 }
 
 export default function RequestDetailsPage() {
@@ -41,238 +51,382 @@ export default function RequestDetailsPage() {
   const router = useRouter();
   const params = useParams();
 
-  const id = useMemo(() => {
+  const requestId = useMemo(() => {
     const raw = (params as any)?.id;
-    return Array.isArray(raw) ? raw[0] : raw;
+    return typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : "";
   }, [params]);
 
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-
-  const [userId, setUserId] = useState<string | null>(null);
-  const [row, setRow] = useState<RequestRow | null>(null);
+  const [request, setRequest] = useState<RequestRow | null>(null);
   const [interests, setInterests] = useState<InterestRow[]>([]);
-  const [matchIdForMe, setMatchIdForMe] = useState<string | null>(null);
+  const [existingMatch, setExistingMatch] = useState<MatchRow | null>(null);
 
-  const isOwner = !!userId && !!row?.user_id && userId === row.user_id;
-  const isClosed = row?.status === "closed" || row?.status === "done";
+  const [meId, setMeId] = useState<string | null>(null);
 
-  async function loadAll() {
-    if (!id) return;
-    setLoading(true);
-    setMsg("");
-
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id ?? null;
-    setUserId(uid);
-
-    const { data: req, error: reqErr } = await supabase
-      .from("requests")
-      .select("*")
-      .eq("id", id)
-      .single();
-
-    if (reqErr) {
-      setMsg(reqErr.message);
-      setLoading(false);
-      return;
-    }
-
-    setRow(req as RequestRow);
-
-    if (uid && req.user_id === uid) {
-      const { data } = await supabase
-        .from("request_interests")
-        .select("request_id, user_id, created_at")
-        .eq("request_id", id)
-        .order("created_at", { ascending: false });
-
-      setInterests((data ?? []) as InterestRow[]);
-    } else {
-      setInterests([]);
-    }
-
-    if (uid && req.user_id) {
-      const { data } = await supabase
-        .from("matches")
-        .select("id")
-        .eq("request_id", id)
-        .or(
-          `and(owner_user_id.eq.${uid},interested_user_id.eq.${req.user_id}),and(owner_user_id.eq.${req.user_id},interested_user_id.eq.${uid})`
-        )
-        .maybeSingle();
-
-      setMatchIdForMe((data as any)?.id ?? null);
-    }
-
-    setLoading(false);
-  }
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string>("");
+  const [debugClicks, setDebugClicks] = useState(false); // slå på hvis du vil ha alert("klikk")
 
   useEffect(() => {
-    loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+    let alive = true;
 
-  async function approveInterest(interestedUserId: string) {
-    try {
-      if (!isOwner || !row?.user_id || !id) {
-        setMsg("Mangler rettigheter eller data.");
+    (async () => {
+      setLoading(true);
+      setMsg("");
+
+      if (!requestId) {
+        setMsg("Mangler request-id i URL.");
+        setLoading(false);
         return;
       }
 
-      setBusy(true);
-      setMsg("Godkjenner interesse…");
+      try {
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
 
-      const { data: created, error } = await supabase
+        if (userErr) console.warn("auth.getUser error:", userErr);
+        if (!alive) return;
+
+        setMeId(user?.id ?? null);
+
+        // 1) request
+        const { data: req, error: reqErr } = await supabase
+          .from("requests")
+          .select("*")
+          .eq("id", requestId)
+          .maybeSingle();
+
+        if (reqErr) {
+          console.error("Fetch request error:", reqErr);
+          setMsg(`Kunne ikke hente request: ${reqErr.message}`);
+        }
+        if (!alive) return;
+
+        setRequest((req as any) ?? null);
+
+        // 2) interests
+        const { data: ints, error: intErr } = await supabase
+          .from("request_interests")
+          .select("request_id,user_id,created_at")
+          .eq("request_id", requestId)
+          .order("created_at", { ascending: false });
+
+        if (intErr) {
+          console.error("Fetch interests error:", intErr);
+          setMsg((m) => m || `Kunne ikke hente interesser: ${intErr.message}`);
+        }
+        if (!alive) return;
+
+        setInterests((ints as any) ?? []);
+
+        // 3) eksisterende match for request (hvis den finnes)
+        const { data: m, error: mErr } = await supabase
+          .from("matches")
+          .select("id,request_id,created_at")
+          .eq("request_id", requestId)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (mErr) {
+          console.warn("Fetch existing match error:", mErr);
+          // Ikke blokker UI av dette
+        }
+        if (!alive) return;
+
+        setExistingMatch((m?.[0] as any) ?? null);
+      } catch (e: any) {
+        console.error("Load error:", e);
+        setMsg(`Uventet feil: ${e?.message ?? String(e)}`);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [requestId, supabase]);
+
+  const isOwner = useMemo(() => {
+    if (!meId || !request?.user_id) return false;
+    return meId === request.user_id;
+  }, [meId, request?.user_id]);
+
+  async function approveInterest(interestUserId: string) {
+    // SUPER tydelig logging for å se hvor det stopper
+    console.log("approveInterest() START", { requestId, interestUserId, meId });
+
+    setMsg("");
+    setBusy(true);
+
+    try {
+      if (!requestId) {
+        setMsg("Mangler requestId.");
+        console.log("approveInterest() STOP: missing requestId");
+        return;
+      }
+      if (!meId) {
+        setMsg("Du må være innlogget.");
+        console.log("approveInterest() STOP: missing meId");
+        return;
+      }
+
+      // Sikkerhetscheck: bare eier skal kunne godkjenne
+      if (!isOwner) {
+        setMsg("Du er ikke eier av denne requesten.");
+        console.log("approveInterest() STOP: not owner");
+        return;
+      }
+
+      // Hvis match finnes allerede -> åpne den
+      if (existingMatch?.id) {
+        console.log("approveInterest(): match exists, redirecting", existingMatch.id);
+        router.push(`/matches/${existingMatch.id}/chat`);
+        return;
+      }
+
+      // 1) Lag match
+      // NB: Vi antar at matches har minst { request_id }. Hvis du har andre required felter,
+      // vil Supabase returnere error – som vi nå viser tydelig.
+      const insertPayload: any = {
+        request_id: requestId,
+      };
+
+      console.log("approveInterest(): inserting match payload", insertPayload);
+
+      const { data: match, error: matchErr } = await supabase
         .from("matches")
-        .insert({
-          request_id: id,
-          owner_user_id: row.user_id,
-          interested_user_id: interestedUserId,
-        })
-        .select("id")
+        .insert(insertPayload)
+        .select("id,request_id,created_at")
         .single();
 
-      if (error) {
-        setMsg(`Kunne ikke opprette match: ${error.message}`);
+      if (matchErr) {
+        console.error("approveInterest(): INSERT matches error", matchErr);
+        setMsg(
+          `Kunne ikke opprette match (trolig RLS eller required fields). ` +
+            `Feil: ${matchErr.message}`
+        );
         return;
       }
 
-      const matchId = (created as any)?.id;
+      console.log("approveInterest(): match created", match);
+
+      // Oppdater local state så “Åpne chat” blir aktiv umiddelbart
+      setExistingMatch(match as any);
+
+      // 2) Redirect til chat
+      const matchId = (match as any)?.id;
       if (!matchId) {
-        setMsg("Match opprettet, men fikk ikke ID (RLS på SELECT?).");
+        setMsg("Match ble opprettet, men mangler id i respons.");
+        console.log("approveInterest(): STOP missing matchId", match);
         return;
       }
 
+      console.log("approveInterest(): redirect ->", `/matches/${matchId}/chat`);
       router.push(`/matches/${matchId}/chat`);
     } catch (e: any) {
-      setMsg(`Feil: ${e?.message ?? e}`);
+      console.error("approveInterest() exception:", e);
+      setMsg(`Uventet feil i approve: ${e?.message ?? String(e)}`);
     } finally {
       setBusy(false);
+      console.log("approveInterest() END");
     }
   }
 
-  async function rejectInterest(interestedUserId: string) {
-    if (!isOwner || !id) return;
-
-    setBusy(true);
+  function openChat() {
+    console.log("openChat() clicked", { existingMatchId: existingMatch?.id });
     setMsg("");
 
-    const { error } = await supabase
-      .from("request_interests")
-      .delete()
-      .eq("request_id", id)
-      .eq("user_id", interestedUserId);
-
-    if (error) {
-      setMsg(error.message);
-    } else {
-      setMsg("Interesse fjernet.");
-      await loadAll();
+    if (!existingMatch?.id) {
+      setMsg("Ingen chat/match funnet for denne requesten ennå.");
+      return;
     }
-
-    setBusy(false);
+    router.push(`/matches/${existingMatch.id}/chat`);
   }
 
   if (loading) {
-    return <div style={{ padding: 20 }}>Laster…</div>;
+    return (
+      <div className="p-6">
+        <div className="text-sm opacity-70">Laster…</div>
+      </div>
+    );
   }
 
-  if (!row) {
-    return <div style={{ padding: 20 }}>Request ikke funnet.</div>;
+  if (!request) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-xl font-semibold">Request</h1>
+        <div className="text-sm opacity-80">
+          Fant ikke request (eller du har ikke tilgang).
+        </div>
+        {msg ? (
+          <div className="rounded-lg border p-3 text-sm">{msg}</div>
+        ) : null}
+        <Link className="underline text-sm" href="/requests">
+          Tilbake til requests
+        </Link>
+      </div>
+    );
   }
 
   return (
-    <div style={{ maxWidth: 900, margin: "40px auto", padding: 16 }}>
-      <Link href="/requests">← Tilbake</Link>
+    <div className="p-6 space-y-6">
+      {/* Topplinje */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Request</h1>
+          <div className="text-sm opacity-70">
+            Opprettet: {fmt(request.created_at)} • Status: {request.status ?? "-"}
+          </div>
+        </div>
 
-      <h1 style={{ fontSize: 28, marginTop: 10 }}>Request</h1>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onPointerDown={() => console.log("POINTERDOWN: Åpne chat")}
+            onClick={() => {
+              console.log("CLICK: Åpne chat");
+              if (debugClicks) alert("klikk: Åpne chat");
+              openChat();
+            }}
+            disabled={busy}
+            className="relative z-50 rounded-lg border px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-50"
+          >
+            Åpne chat
+          </button>
 
-      <p>
-        <strong>{row.municipality}</strong>
-        {row.start_time ? ` · ${fmtDate(row.start_time)}` : ""}
-      </p>
+          <Link
+            href="/requests"
+            className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
+          >
+            Tilbake
+          </Link>
+        </div>
+      </div>
 
-      {matchIdForMe && (
-        <Link
-          href={`/matches/${matchIdForMe}/chat`}
-          style={{
-            display: "inline-block",
-            marginTop: 10,
-            padding: "10px 14px",
-            border: "1px solid #111",
-            borderRadius: 10,
-            textDecoration: "none",
-          }}
-        >
-          Åpne chat
-        </Link>
-      )}
+      {/* Debug kontroll */}
+      <div className="flex items-center gap-2 text-sm">
+        <input
+          id="debugClicks"
+          type="checkbox"
+          checked={debugClicks}
+          onChange={(e) => setDebugClicks(e.target.checked)}
+        />
+        <label htmlFor="debugClicks" className="opacity-80">
+          Debug: bruk alert() på klikk
+        </label>
+      </div>
 
-      {msg && (
-        <pre
-          style={{
-            marginTop: 14,
-            padding: 12,
-            background: "#111",
-            color: "#ddd",
-            borderRadius: 10,
-            fontSize: 12,
-          }}
-        >
-          {msg}
-        </pre>
-      )}
+      {msg ? (
+        <div className="rounded-lg border p-3 text-sm">
+          <div className="font-medium mb-1">Melding</div>
+          <div className="opacity-90 whitespace-pre-wrap">{msg}</div>
+        </div>
+      ) : null}
 
-      {isOwner && (
-        <div style={{ marginTop: 24 }}>
-          <h2>Interesser</h2>
+      {/* Request detaljer */}
+      <div className="rounded-xl border p-4 space-y-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+          <div>
+            <span className="opacity-70">Kommune:</span>{" "}
+            {request.municipality ?? "-"}
+          </div>
+          <div>
+            <span className="opacity-70">Sted:</span>{" "}
+            {request.location_text ?? "-"}
+          </div>
+          <div>
+            <span className="opacity-70">Start:</span> {fmt(request.start_time)}
+          </div>
+          <div>
+            <span className="opacity-70">Varighet:</span>{" "}
+            {request.duration_minutes ?? "-"} min
+          </div>
+          <div>
+            <span className="opacity-70">Nivå:</span>{" "}
+            {(request.level_min ?? "-") + " – " + (request.level_max ?? "-")}
+          </div>
+          <div>
+            <span className="opacity-70">Type:</span> {request.type ?? "-"}
+          </div>
+        </div>
 
-          {interests.length === 0 ? (
-            <p>Ingen interesser ennå.</p>
-          ) : (
-            interests.map((i) => (
+        {request.notes ? (
+          <div className="pt-2 text-sm">
+            <div className="opacity-70">Notater</div>
+            <div className="whitespace-pre-wrap">{request.notes}</div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Interesser */}
+      <div className="rounded-xl border p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Interesser</h2>
+
+          <div className="text-sm opacity-70">
+            {isOwner ? "Du er eier" : "Du er ikke eier"}
+            {existingMatch?.id ? ` • Match finnes (${existingMatch.id})` : ""}
+          </div>
+        </div>
+
+        {interests.length === 0 ? (
+          <div className="text-sm opacity-70">Ingen interesser enda.</div>
+        ) : (
+          <div className="space-y-2">
+            {interests.map((i) => (
               <div
-                key={i.user_id}
-                style={{
-                  border: "1px solid #333",
-                  borderRadius: 10,
-                  padding: 12,
-                  marginBottom: 10,
-                  display: "flex",
-                  justifyContent: "space-between",
-                }}
+                key={`${i.request_id}:${i.user_id}`}
+                className="flex items-center justify-between gap-3 rounded-lg border p-3"
               >
-                <div>
-                  <div style={{ fontWeight: 700 }}>{i.user_id}</div>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>
-                    {fmtDate(i.created_at)}
-                  </div>
+                <div className="text-sm">
+                  <div className="font-medium">User: {i.user_id}</div>
+                  <div className="opacity-70">Tid: {fmt(i.created_at)}</div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    disabled={busy || isClosed}
-                    onClick={() => approveInterest(i.user_id)}
-                  >
-                    Godkjenn → Chat
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => rejectInterest(i.user_id)}
-                  >
-                    Fjern
-                  </button>
+                <div className="flex items-center gap-2">
+                  {isOwner ? (
+                    <button
+                      type="button"
+                      onPointerDown={() =>
+                        console.log("POINTERDOWN: Godkjenn", i.user_id)
+                      }
+                      onClick={() => {
+                        console.log("CLICK: Godkjenn", i.user_id);
+                        if (debugClicks) alert("klikk: Godkjenn");
+                        approveInterest(i.user_id);
+                      }}
+                      disabled={busy}
+                      className="relative z-50 rounded-lg bg-black text-white px-3 py-2 text-sm hover:opacity-90 disabled:opacity-50"
+                    >
+                      Godkjenn → Chat
+                    </button>
+                  ) : (
+                    <div className="text-xs opacity-70">Kun eier kan godkjenne</div>
+                  )}
                 </div>
               </div>
-            ))
-          )}
+            ))}
+          </div>
+        )}
+
+        {/* Ekstra: tydelig knapp som alltid kan teste klikk */}
+        <div className="pt-2">
+          <button
+            type="button"
+            onPointerDown={() => console.log("POINTERDOWN: TEST-KNAPP")}
+            onClick={() => {
+              console.log("CLICK: TEST-KNAPP (skal alltid trigge)");
+              alert("TEST: klikk registrert ✅");
+            }}
+            className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
+          >
+            TEST: Klikk meg (skal alltid gi alert)
+          </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
