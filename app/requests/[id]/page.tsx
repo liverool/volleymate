@@ -36,6 +36,7 @@ type MatchRow = {
   request_id: string | null;
   requester_id: string | null;
   partner_id: string | null;
+  owner_user_id: string | null;
   created_at: string | null;
 };
 
@@ -67,7 +68,6 @@ export default function RequestDetailsPage() {
   const [existingMatch, setExistingMatch] = useState<MatchRow | null>(null);
 
   const [msg, setMsg] = useState<string>("");
-  const [debugAlerts, setDebugAlerts] = useState(false);
 
   const isOwner = useMemo(() => {
     if (!meId || !request?.user_id) return false;
@@ -84,7 +84,6 @@ export default function RequestDetailsPage() {
       return;
     }
 
-    // 1) hvem er jeg
     const {
       data: { user },
       error: userErr,
@@ -93,43 +92,32 @@ export default function RequestDetailsPage() {
     if (userErr) console.warn("auth.getUser error:", userErr);
     setMeId(user?.id ?? null);
 
-    // 2) hent request
     const { data: req, error: reqErr } = await supabase
       .from("requests")
       .select("*")
       .eq("id", requestId)
       .maybeSingle();
 
-    if (reqErr) {
-      console.error("Fetch request error:", reqErr);
-      setMsg(`Kunne ikke hente request: ${reqErr.message}`);
-    }
+    if (reqErr) setMsg(`Kunne ikke hente request: ${reqErr.message}`);
     setRequest((req as any) ?? null);
 
-    // 3) hent interesser
     const { data: ints, error: intErr } = await supabase
       .from("request_interests")
       .select("request_id,user_id,created_at")
       .eq("request_id", requestId)
       .order("created_at", { ascending: false });
 
-    if (intErr) {
-      console.error("Fetch interests error:", intErr);
-      setMsg((m) => m || `Kunne ikke hente interesser: ${intErr.message}`);
-    }
+    if (intErr) setMsg((m) => m || `Kunne ikke hente interesser: ${intErr.message}`);
     setInterests((ints as any) ?? []);
 
-    // 4) hent eksisterende match (hvis finnes)
     const { data: m, error: mErr } = await supabase
       .from("matches")
-      .select("id,request_id,requester_id,partner_id,created_at")
+      .select("id,request_id,requester_id,partner_id,owner_user_id,created_at")
       .eq("request_id", requestId)
       .order("created_at", { ascending: false })
       .limit(1);
 
-    if (mErr) {
-      console.warn("Fetch existing match error:", mErr);
-    }
+    if (mErr) console.warn("Fetch existing match error:", mErr);
     setExistingMatch((m?.[0] as any) ?? null);
 
     setLoading(false);
@@ -142,7 +130,6 @@ export default function RequestDetailsPage() {
         await loadAll();
       } catch (e: any) {
         if (!alive) return;
-        console.error("Load error:", e);
         setMsg(`Uventet feil: ${e?.message ?? String(e)}`);
         setLoading(false);
       }
@@ -154,91 +141,51 @@ export default function RequestDetailsPage() {
   }, [requestId]);
 
   async function approveInterest(interestUserId: string) {
-    console.log("approveInterest() START", { requestId, interestUserId, meId });
-    if (debugAlerts) alert("KLIKK: Godkjenn");
-
     setMsg("");
     setBusy(true);
 
     try {
-      if (!requestId) {
-        setMsg("Mangler requestId.");
-        return;
-      }
-      if (!meId) {
-        setMsg("Du må være innlogget.");
-        return;
-      }
-      if (!request) {
-        setMsg("Request ikke lastet.");
-        return;
-      }
-      if (!isOwner) {
-        setMsg("Du er ikke eier av denne requesten.");
-        return;
-      }
+      if (!requestId) return setMsg("Mangler requestId.");
+      if (!meId) return setMsg("Du må være innlogget.");
+      if (!request) return setMsg("Request ikke lastet.");
+      if (!isOwner) return setMsg("Du er ikke eier av denne requesten.");
 
-      // Hvis match finnes allerede: gå direkte til chat
       if (existingMatch?.id) {
-        console.log("approveInterest(): match exists -> redirect", existingMatch.id);
         router.push(`/matches/${existingMatch.id}/chat`);
         return;
       }
 
-      // matches krever requester_id + partner_id (NOT NULL)
       const insertPayload: any = {
         request_id: requestId,
         requester_id: meId,
         partner_id: interestUserId,
+        owner_user_id: meId, // ✅ required
       };
-
-      console.log("approveInterest(): inserting matches payload", insertPayload);
 
       const { data: match, error: matchErr } = await supabase
         .from("matches")
         .insert(insertPayload)
-        .select("id,request_id,requester_id,partner_id,created_at")
+        .select("id,request_id,requester_id,partner_id,owner_user_id,created_at")
         .single();
 
       if (matchErr) {
-        console.error("approveInterest(): INSERT matches error", matchErr);
         setMsg(
-          `Kunne ikke opprette match. ` +
-            `Feil: ${matchErr.message}` +
+          `Kunne ikke opprette match. Feil: ${matchErr.message}` +
             (matchErr.details ? `\nDetails: ${matchErr.details}` : "")
         );
         return;
       }
 
-      console.log("approveInterest(): match created", match);
       setExistingMatch(match as any);
-
-      const matchId = (match as any)?.id;
-      if (!matchId) {
-        setMsg("Match ble opprettet, men mangler id i respons.");
-        return;
-      }
-
-      console.log("approveInterest(): redirect ->", `/matches/${matchId}/chat`);
-      router.push(`/matches/${matchId}/chat`);
-    } catch (e: any) {
-      console.error("approveInterest() exception:", e);
-      setMsg(`Uventet feil i approve: ${e?.message ?? String(e)}`);
+      router.push(`/matches/${(match as any).id}/chat`);
     } finally {
       setBusy(false);
-      console.log("approveInterest() END");
     }
   }
 
   function openChat() {
-    console.log("openChat() clicked", { existingMatchId: existingMatch?.id });
-    if (debugAlerts) alert("KLIKK: Åpne chat");
-
     setMsg("");
-    if (!existingMatch?.id) {
-      setMsg("Ingen chat/match finnes for denne requesten ennå.");
-      return;
-    }
+    if (!existingMatch?.id) return setMsg("Ingen chat/match finnes for denne requesten ennå.");
     router.push(`/matches/${existingMatch.id}/chat`);
   }
 
@@ -265,7 +212,6 @@ export default function RequestDetailsPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Request</h1>
@@ -277,36 +223,16 @@ export default function RequestDetailsPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onPointerDown={() => console.log("POINTERDOWN: Åpne chat")}
-            onClick={() => {
-              console.log("CLICK: Åpne chat");
-              openChat();
-            }}
+            onClick={openChat}
             disabled={busy}
-            className="relative z-50 rounded-lg border px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-50"
+            className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-50"
           >
             Åpne chat
           </button>
-
           <Link href="/requests" className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5">
             Tilbake
           </Link>
         </div>
-      </div>
-
-      {/* Debug */}
-      <div className="flex items-center gap-2 text-sm">
-        <input
-          id="debugAlerts"
-          type="checkbox"
-          checked={debugAlerts}
-          onChange={(e) => setDebugAlerts(e.target.checked)}
-        />
-        <label htmlFor="debugAlerts" className="opacity-80">
-          Debug: alert() på klikk
-        </label>
-        <span className="opacity-60">• eier: {String(isOwner)}</span>
-        <span className="opacity-60">• match: {existingMatch?.id ? existingMatch.id : "ingen"}</span>
       </div>
 
       {msg ? (
@@ -316,7 +242,6 @@ export default function RequestDetailsPage() {
         </div>
       ) : null}
 
-      {/* Request details */}
       <div className="rounded-xl border p-4 space-y-2">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
           <div>
@@ -348,7 +273,6 @@ export default function RequestDetailsPage() {
         ) : null}
       </div>
 
-      {/* Interests */}
       <div className="rounded-xl border p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Interesser</h2>
@@ -373,13 +297,9 @@ export default function RequestDetailsPage() {
                   {isOwner ? (
                     <button
                       type="button"
-                      onPointerDown={() => console.log("POINTERDOWN: Godkjenn", i.user_id)}
-                      onClick={() => {
-                        console.log("CLICK: Godkjenn", i.user_id);
-                        approveInterest(i.user_id);
-                      }}
+                      onClick={() => approveInterest(i.user_id)}
                       disabled={busy}
-                      className="relative z-50 rounded-lg bg-black text-white px-3 py-2 text-sm hover:opacity-90 disabled:opacity-50"
+                      className="rounded-lg bg-black text-white px-3 py-2 text-sm hover:opacity-90 disabled:opacity-50"
                     >
                       Godkjenn → Chat
                     </button>
@@ -391,18 +311,6 @@ export default function RequestDetailsPage() {
             ))}
           </div>
         )}
-
-        {/* Test-knapp */}
-        <div className="pt-2">
-          <button
-            type="button"
-            onPointerDown={() => console.log("POINTERDOWN: TEST")}
-            onClick={() => alert("TEST: klikk registrert ✅")}
-            className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
-          >
-            TEST: Klikk meg
-          </button>
-        </div>
       </div>
     </div>
   );
