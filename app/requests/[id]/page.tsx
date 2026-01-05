@@ -33,11 +33,13 @@ type InterestRow = {
 
 type MatchRow = {
   id: string;
-  request_id: string | null;
-  requester_id: string | null;
-  partner_id: string | null;
-  owner_user_id: string | null;
+  request_id: string;
+  requester_id: string;
+  partner_id: string;
+  owner_user_id: string;
+  interested_user_id: string;
   created_at: string | null;
+  status: string | null;
 };
 
 function fmt(iso: string | null) {
@@ -89,7 +91,7 @@ export default function RequestDetailsPage() {
       error: userErr,
     } = await supabase.auth.getUser();
 
-    if (userErr) console.warn("auth.getUser error:", userErr);
+    if (userErr) console.warn(userErr);
     setMeId(user?.id ?? null);
 
     const { data: req, error: reqErr } = await supabase
@@ -112,31 +114,21 @@ export default function RequestDetailsPage() {
 
     const { data: m, error: mErr } = await supabase
       .from("matches")
-      .select("id,request_id,requester_id,partner_id,owner_user_id,created_at")
+      .select("id,request_id,requester_id,partner_id,owner_user_id,interested_user_id,created_at,status")
       .eq("request_id", requestId)
       .order("created_at", { ascending: false })
       .limit(1);
 
-    if (mErr) console.warn("Fetch existing match error:", mErr);
+    if (mErr) {
+      // Ikke stopp siden – match kan være RLS-protected for noen
+    }
     setExistingMatch((m?.[0] as any) ?? null);
 
     setLoading(false);
   }
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        await loadAll();
-      } catch (e: any) {
-        if (!alive) return;
-        setMsg(`Uventet feil: ${e?.message ?? String(e)}`);
-        setLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
+    loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId]);
 
@@ -150,6 +142,7 @@ export default function RequestDetailsPage() {
       if (!request) return setMsg("Request ikke lastet.");
       if (!isOwner) return setMsg("Du er ikke eier av denne requesten.");
 
+      // Finnes match allerede? åpne chat
       if (existingMatch?.id) {
         router.push(`/matches/${existingMatch.id}/chat`);
         return;
@@ -159,13 +152,15 @@ export default function RequestDetailsPage() {
         request_id: requestId,
         requester_id: meId,
         partner_id: interestUserId,
-        owner_user_id: meId, // ✅ required
+        owner_user_id: meId,
+        interested_user_id: interestUserId, // ✅ required
+        // status har default
       };
 
       const { data: match, error: matchErr } = await supabase
         .from("matches")
         .insert(insertPayload)
-        .select("id,request_id,requester_id,partner_id,owner_user_id,created_at")
+        .select("id,request_id,requester_id,partner_id,owner_user_id,interested_user_id,created_at,status")
         .single();
 
       if (matchErr) {
