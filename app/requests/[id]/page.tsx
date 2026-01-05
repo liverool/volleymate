@@ -155,7 +155,6 @@ export default function RequestDetailsPage() {
         partner_id: interestUserId,
         owner_user_id: meId,
         interested_user_id: interestUserId, // ✅ required
-        // status har default
       };
 
       const { data: match, error: matchErr } = await supabase
@@ -191,9 +190,10 @@ export default function RequestDetailsPage() {
     if (!meId) return setMsg("Du må være innlogget.");
     if (!isOwner) return setMsg("Du er ikke eier av denne requesten.");
 
-    // ✅ Valgfritt, men trygt: ikke slett hvis match finnes
     if (existingMatch?.id) {
-      return setMsg("Denne requesten har allerede en match/chat. Sletting er blokkert for å unngå å ødelegge flyten.");
+      return setMsg(
+        "Denne requesten har allerede en match/chat. Sletting er blokkert for å unngå å ødelegge flyten."
+      );
     }
 
     const ok = confirm("Er du sikker på at du vil slette denne requesten?");
@@ -217,7 +217,7 @@ export default function RequestDetailsPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="text-sm opacity-70">Laster…</div>
       </div>
     );
@@ -225,7 +225,7 @@ export default function RequestDetailsPage() {
 
   if (!request) {
     return (
-      <div className="p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-4">
         <h1 className="text-xl font-semibold">Request</h1>
         <div className="text-sm opacity-80">Fant ikke request (eller ingen tilgang).</div>
         {msg ? <div className="rounded-lg border p-3 text-sm whitespace-pre-wrap">{msg}</div> : null}
@@ -237,23 +237,22 @@ export default function RequestDetailsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+    <div className="p-4 sm:p-6 space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold">Request</h1>
-          <div className="text-sm opacity-70">
+          <div className="text-sm opacity-70 break-words">
             Opprettet: {fmt(request.created_at)} • Status: {request.status ?? "-"}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* ✅ SLETT: kun eier */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           {isOwner ? (
             <button
               type="button"
               onClick={deleteRequest}
               disabled={busy || busyDelete}
-              className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+              className="w-full sm:w-auto rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
               title={existingMatch?.id ? "Kan ikke slette når match/chat finnes" : "Slett request"}
             >
               {busyDelete ? "Sletter…" : "Slett"}
@@ -264,12 +263,15 @@ export default function RequestDetailsPage() {
             type="button"
             onClick={openChat}
             disabled={busy}
-            className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-50"
+            className="w-full sm:w-auto rounded-lg border px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-50"
           >
             Åpne chat
           </button>
 
-          <Link href="/requests" className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5">
+          <Link
+            href="/requests"
+            className="w-full sm:w-auto text-center rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
+          >
             Tilbake
           </Link>
         </div>
@@ -278,29 +280,29 @@ export default function RequestDetailsPage() {
       {msg ? (
         <div className="rounded-lg border p-3 text-sm">
           <div className="font-medium mb-1">Melding</div>
-          <div className="opacity-90 whitespace-pre-wrap">{msg}</div>
+          <div className="opacity-90 whitespace-pre-wrap break-words">{msg}</div>
         </div>
       ) : null}
 
       <div className="rounded-xl border p-4 space-y-2">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-          <div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+          <div className="break-words">
             <span className="opacity-70">Kommune:</span> {request.municipality ?? "-"}
           </div>
-          <div>
+          <div className="break-words">
             <span className="opacity-70">Sted:</span> {request.location_text ?? "-"}
           </div>
-          <div>
+          <div className="break-words">
             <span className="opacity-70">Start:</span> {fmt(request.start_time)}
           </div>
-          <div>
+          <div className="break-words">
             <span className="opacity-70">Varighet:</span> {request.duration_minutes ?? "-"} min
           </div>
-          <div>
+          <div className="break-words">
             <span className="opacity-70">Nivå:</span>{" "}
             {(request.level_min ?? "-") + " – " + (request.level_max ?? "-")}
           </div>
-          <div>
+          <div className="break-words">
             <span className="opacity-70">Type:</span> {request.type ?? "-"}
           </div>
         </div>
@@ -308,13 +310,13 @@ export default function RequestDetailsPage() {
         {request.notes ? (
           <div className="pt-2 text-sm">
             <div className="opacity-70">Notater</div>
-            <div className="whitespace-pre-wrap">{request.notes}</div>
+            <div className="whitespace-pre-wrap break-words">{request.notes}</div>
           </div>
         ) : null}
       </div>
 
       <div className="rounded-xl border p-4 space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <h2 className="text-lg font-semibold">Interesser</h2>
           <div className="text-sm opacity-70">{isOwner ? "Du er eier" : "Kun eier kan godkjenne"}</div>
         </div>
@@ -326,11 +328,11 @@ export default function RequestDetailsPage() {
             {interests.map((i) => (
               <div
                 key={`${i.request_id}:${i.user_id}`}
-                className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border p-3"
               >
-                <div className="text-sm">
-                  <div className="font-medium">User: {i.user_id}</div>
-                  <div className="opacity-70">Tid: {fmt(i.created_at)}</div>
+                <div className="text-sm min-w-0">
+                  <div className="font-medium break-words">User: {i.user_id}</div>
+                  <div className="opacity-70 break-words">Tid: {fmt(i.created_at)}</div>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -339,7 +341,7 @@ export default function RequestDetailsPage() {
                       type="button"
                       onClick={() => approveInterest(i.user_id)}
                       disabled={busy}
-                      className="rounded-lg bg-black text-white px-3 py-2 text-sm hover:opacity-90 disabled:opacity-50"
+                      className="w-full sm:w-auto rounded-lg bg-black text-white px-3 py-2 text-sm hover:opacity-90 disabled:opacity-50"
                     >
                       Godkjenn → Chat
                     </button>
