@@ -35,6 +35,7 @@ type MatchRow = {
   id: string;
   request_id: string | null;
   requester_id: string | null;
+  partner_id: string | null;
   created_at: string | null;
 };
 
@@ -103,7 +104,6 @@ export default function RequestDetailsPage() {
       console.error("Fetch request error:", reqErr);
       setMsg(`Kunne ikke hente request: ${reqErr.message}`);
     }
-
     setRequest((req as any) ?? null);
 
     // 3) hent interesser
@@ -117,23 +117,21 @@ export default function RequestDetailsPage() {
       console.error("Fetch interests error:", intErr);
       setMsg((m) => m || `Kunne ikke hente interesser: ${intErr.message}`);
     }
-
     setInterests((ints as any) ?? []);
 
     // 4) hent eksisterende match (hvis finnes)
     const { data: m, error: mErr } = await supabase
       .from("matches")
-      .select("id,request_id,requester_id,created_at")
+      .select("id,request_id,requester_id,partner_id,created_at")
       .eq("request_id", requestId)
       .order("created_at", { ascending: false })
       .limit(1);
 
     if (mErr) {
       console.warn("Fetch existing match error:", mErr);
-      // ikke blokker siden
     }
-
     setExistingMatch((m?.[0] as any) ?? null);
+
     setLoading(false);
   }
 
@@ -149,7 +147,6 @@ export default function RequestDetailsPage() {
         setLoading(false);
       }
     })();
-
     return () => {
       alive = false;
     };
@@ -188,12 +185,11 @@ export default function RequestDetailsPage() {
         return;
       }
 
-      // INSERT: matches krever requester_id (NOT NULL)
-      // requester_id = eier (deg), dvs auth.uid()
-      // request_id = requestId
+      // matches krever requester_id + partner_id (NOT NULL)
       const insertPayload: any = {
         request_id: requestId,
         requester_id: meId,
+        partner_id: interestUserId,
       };
 
       console.log("approveInterest(): inserting matches payload", insertPayload);
@@ -201,7 +197,7 @@ export default function RequestDetailsPage() {
       const { data: match, error: matchErr } = await supabase
         .from("matches")
         .insert(insertPayload)
-        .select("id,request_id,requester_id,created_at")
+        .select("id,request_id,requester_id,partner_id,created_at")
         .single();
 
       if (matchErr) {
@@ -259,9 +255,7 @@ export default function RequestDetailsPage() {
       <div className="p-6 space-y-4">
         <h1 className="text-xl font-semibold">Request</h1>
         <div className="text-sm opacity-80">Fant ikke request (eller ingen tilgang).</div>
-
         {msg ? <div className="rounded-lg border p-3 text-sm whitespace-pre-wrap">{msg}</div> : null}
-
         <Link className="underline text-sm" href="/requests">
           Tilbake til requests
         </Link>
@@ -403,10 +397,7 @@ export default function RequestDetailsPage() {
           <button
             type="button"
             onPointerDown={() => console.log("POINTERDOWN: TEST")}
-            onClick={() => {
-              console.log("CLICK: TEST (skal alltid trigge)");
-              alert("TEST: klikk registrert ✅");
-            }}
+            onClick={() => alert("TEST: klikk registrert ✅")}
             className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
           >
             TEST: Klikk meg
