@@ -94,11 +94,11 @@ export default function MatchChatPage() {
       }
       const userId = authData.user.id;
 
-      // display_name (robust: om profiles ikke har id, bare fallback)
+      // ✅ FIX: profiles bruker user_id (ikke id)
       const { data: profileData } = await supabase
         .from("profiles")
         .select("display_name")
-        .eq("id", userId)
+        .eq("user_id", userId)
         .single();
 
       setMe({ id: userId, display_name: (profileData as any)?.display_name ?? null });
@@ -300,7 +300,10 @@ export default function MatchChatPage() {
                 const textToShow = (m.content ?? m.body ?? "").toString();
 
                 return (
-                  <div key={item.key} style={{ display: "flex", flexDirection: "column", alignItems: isMine ? "flex-end" : "flex-start" }}>
+                  <div
+                    key={item.key}
+                    style={{ display: "flex", flexDirection: "column", alignItems: isMine ? "flex-end" : "flex-start" }}
+                  >
                     <div
                       style={{
                         maxWidth: "78%",
