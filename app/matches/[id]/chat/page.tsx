@@ -94,7 +94,6 @@ export default function MatchChatPage() {
       }
       const userId = authData.user.id;
 
-      // ✅ FIX: profiles bruker user_id (ikke id)
       const { data: profileData } = await supabase
         .from("profiles")
         .select("display_name")
@@ -117,7 +116,6 @@ export default function MatchChatPage() {
           async () => {
             await loadMessages();
             await markRead(userId);
-            // hvis du allerede er nær bunnen, scroll
             scrollToBottom(true);
           }
         )
@@ -133,7 +131,6 @@ export default function MatchChatPage() {
   }, [matchId]);
 
   useEffect(() => {
-    // scroll når vi får nye meldinger
     scrollToBottom(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
@@ -163,7 +160,6 @@ export default function MatchChatPage() {
     await markRead(me.id);
   };
 
-  // Gruppér meldinger med “dag-separator”
   const rendered = (() => {
     const out: Array<{ type: "day"; key: string; label: string } | { type: "msg"; key: string; m: MessageRow }> = [];
     let lastDay = "";
@@ -180,17 +176,20 @@ export default function MatchChatPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 24, color: "var(--vm-text)" }}>
+      <div style={{ padding: 16, color: "var(--vm-text)" }}>
         <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Chat</h1>
         <p style={{ color: "var(--vm-muted)" }}>Laster…</p>
       </div>
     );
   }
 
+  // ✅ Mobil: bruk dvh hvis tilgjengelig (browser håndterer adressefelt bedre)
+  const vh = "100dvh";
+
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: vh,
         background: "var(--vm-bg)",
         color: "var(--vm-text)",
         display: "flex",
@@ -208,7 +207,16 @@ export default function MatchChatPage() {
           borderBottom: "1px solid var(--vm-border)",
         }}
       >
-        <div style={{ maxWidth: 980, margin: "0 auto", padding: "14px 16px", display: "flex", alignItems: "center" }}>
+        <div
+          style={{
+            maxWidth: 980,
+            margin: "0 auto",
+            padding: "12px 12px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
           <button
             onClick={() => router.push("/matches")}
             style={{
@@ -219,19 +227,29 @@ export default function MatchChatPage() {
               borderRadius: "var(--vm-radius-md)",
               cursor: "pointer",
               fontWeight: 700,
+              whiteSpace: "nowrap",
             }}
           >
             ← Matches
           </button>
 
-          <div style={{ marginLeft: 12 }}>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 900, fontSize: 16, lineHeight: 1.1 }}>Chat</div>
-            <div style={{ fontSize: 12, color: "var(--vm-muted)" }}>
+            <div style={{ fontSize: 12, color: "var(--vm-muted)", overflow: "hidden", textOverflow: "ellipsis" }}>
               {me?.display_name ? `Du: ${me.display_name}` : " "}
             </div>
           </div>
 
-          <div style={{ marginLeft: "auto", fontSize: 12, color: "var(--vm-muted)" }}>
+          {/* ✅ Mobil: skjul match-id (tar mye plass) */}
+          <div
+            style={{
+              marginLeft: "auto",
+              fontSize: 12,
+              color: "var(--vm-muted)",
+              display: "none",
+            }}
+            className="vm-hide-on-mobile"
+          >
             Match: <span style={{ opacity: 0.8 }}>{matchId.slice(0, 8)}…</span>
           </div>
         </div>
@@ -239,7 +257,7 @@ export default function MatchChatPage() {
 
       {/* Error */}
       {error && (
-        <div style={{ maxWidth: 980, margin: "12px auto 0", padding: "0 16px" }}>
+        <div style={{ maxWidth: 980, margin: "12px auto 0", padding: "0 12px" }}>
           <div
             style={{
               border: "1px solid rgba(255,0,0,0.35)",
@@ -255,15 +273,18 @@ export default function MatchChatPage() {
 
       {/* Message list */}
       <div style={{ flex: 1, display: "flex" }}>
-        <div style={{ maxWidth: 980, margin: "0 auto", padding: "14px 16px 10px", width: "100%" }}>
+        <div style={{ maxWidth: 980, margin: "0 auto", padding: "12px 12px 10px", width: "100%" }}>
           <div
             ref={listRef}
             style={{
               border: "1px solid var(--vm-border)",
               background: "var(--vm-surface)",
               borderRadius: "var(--vm-radius-lg)",
-              padding: 14,
-              height: "calc(100vh - 170px)",
+              padding: 12,
+
+              // ✅ smartere høyde: tar hensyn til header+composer
+              // mobile: litt lavere marginer
+              height: `calc(${vh} - 150px)`,
               overflowY: "auto",
               display: "flex",
               flexDirection: "column",
@@ -271,9 +292,7 @@ export default function MatchChatPage() {
             }}
           >
             {messages.length === 0 ? (
-              <div style={{ color: "var(--vm-muted)", padding: 8 }}>
-                Ingen meldinger ennå. Send en første 👇
-              </div>
+              <div style={{ color: "var(--vm-muted)", padding: 8 }}>Ingen meldinger ennå. Send en første 👇</div>
             ) : (
               rendered.map((item) => {
                 if (item.type === "day") {
@@ -302,11 +321,16 @@ export default function MatchChatPage() {
                 return (
                   <div
                     key={item.key}
-                    style={{ display: "flex", flexDirection: "column", alignItems: isMine ? "flex-end" : "flex-start" }}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: isMine ? "flex-end" : "flex-start",
+                    }}
                   >
                     <div
                       style={{
-                        maxWidth: "78%",
+                        // ✅ Mobil: litt bredere bobler
+                        maxWidth: "90%",
                         padding: "10px 12px",
                         borderRadius: 16,
                         border: "1px solid var(--vm-border)",
@@ -342,7 +366,16 @@ export default function MatchChatPage() {
           backdropFilter: "blur(8px)",
         }}
       >
-        <div style={{ maxWidth: 980, margin: "0 auto", padding: "12px 16px", display: "flex", gap: 10 }}>
+        <div
+          style={{
+            maxWidth: 980,
+            margin: "0 auto",
+            padding: "10px 12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -354,19 +387,22 @@ export default function MatchChatPage() {
               }
             }}
             style={{
-              flex: 1,
+              width: "100%",
               padding: "12px 12px",
               borderRadius: "var(--vm-radius-md)",
               border: "1px solid var(--vm-border)",
               background: "var(--vm-surface)",
               color: "var(--vm-text)",
               outline: "none",
+              fontSize: 16, // ✅ bedre på mobil (hindrer iOS-zoom)
             }}
           />
+
           <button
             onClick={sendMessage}
             disabled={!text.trim()}
             style={{
+              width: "100%",
               padding: "12px 14px",
               borderRadius: "var(--vm-radius-md)",
               border: "1px solid var(--vm-border)",
@@ -375,10 +411,16 @@ export default function MatchChatPage() {
               cursor: text.trim() ? "pointer" : "not-allowed",
               fontWeight: 900,
               whiteSpace: "nowrap",
+              fontSize: 16,
             }}
           >
             Send
           </button>
+
+          {/* ✅ Desktop: vis match-id her (valgfritt, tar ikke plass på mobil) */}
+          <div style={{ fontSize: 12, color: "var(--vm-muted)", opacity: 0.8 }}>
+            Match: {matchId.slice(0, 8)}…
+          </div>
         </div>
       </div>
     </div>
