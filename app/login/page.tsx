@@ -11,7 +11,7 @@ export default function LoginPage() {
   const supabase = createClient();
 
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [displayName, setDisplayName] = useState(""); // ✅ NY
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -31,7 +31,7 @@ export default function LoginPage() {
         const { data } = await supabase.auth.getSession();
         if (data.session) router.replace("/");
       } catch {
-        // Ikke kræsje UI
+        // ignore
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -83,32 +83,20 @@ export default function LoginPage() {
         password,
         options: {
           emailRedirectTo: `${origin}/auth/callback`,
-          data: {
-            display_name: dn, // ✅ lagres i auth metadata (triggeren vår kan plukke den opp)
-          },
+          data: { display_name: dn },
         },
       });
 
       if (error) throw error;
 
-      // ✅ Forsøk å oppdatere profiles direkte (trygt, men ikke kritisk)
-      // signUp returnerer data.user selv om session kan være null.
       if (data.user?.id) {
         const { error: profErr } = await supabase
           .from("profiles")
-          .upsert(
-            { user_id: data.user.id, display_name: dn },
-            { onConflict: "user_id" }
-          );
+          .upsert({ user_id: data.user.id, display_name: dn }, { onConflict: "user_id" });
 
-        // Ikke stopp flyten om dette feiler (RLS/latency osv). Trigger/backfill dekker.
-        if (profErr) {
-          // Bare logg i console for debug, ikke skrem brukeren.
-          console.warn("profiles upsert failed:", profErr.message);
-        }
+        if (profErr) console.warn("profiles upsert failed:", profErr.message);
       }
 
-      // Vanlig når e-postbekreftelse er på: session=null
       if (!data.session) {
         setMessage(
           "success",
@@ -116,12 +104,10 @@ export default function LoginPage() {
         );
         setMode("login");
         setPassword("");
-        // behold displayName? jeg ville nullstilt:
         setDisplayName("");
         return;
       }
 
-      // Hvis confirmation er av og session finnes:
       router.replace("/");
     } catch (err: any) {
       setMessage("error", err?.message ?? "Noe gikk galt.");
@@ -160,135 +146,172 @@ export default function LoginPage() {
     }
   }
 
+  const cardStyle: React.CSSProperties = {
+    maxWidth: 440,
+    margin: "24px auto",
+    padding: 16,
+  };
+
+  const panelStyle: React.CSSProperties = {
+    border: "1px solid #e5e5e5",
+    borderRadius: 14,
+    padding: 16,
+  };
+
+  const labelStyle: React.CSSProperties = { display: "grid", gap: 6 };
+
+  const inputStyle: React.CSSProperties = {
+    padding: 12,
+    borderRadius: 10,
+    border: "1px solid #ccc",
+    width: "100%",
+    fontSize: 16, // ✅ bedre på mobil (hindrer zoom på iOS)
+  };
+
+  const primaryBtn: React.CSSProperties = {
+    padding: 12,
+    borderRadius: 12,
+    border: "1px solid #111",
+    cursor: busy ? "not-allowed" : "pointer",
+    width: "100%",
+    fontSize: 16,
+  };
+
+  const toggleWrap: React.CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 8,
+    marginBottom: 12,
+  };
+
+  const toggleBtn = (active: boolean): React.CSSProperties => ({
+    padding: 12,
+    borderRadius: 12,
+    border: "1px solid #ccc",
+    background: active ? "#111" : "transparent",
+    color: active ? "#fff" : "#111",
+    width: "100%",
+    fontSize: 16,
+  });
+
   return (
-    <main style={{ maxWidth: 420, margin: "40px auto", padding: 16 }}>
-      <h1 style={{ fontSize: 28, marginBottom: 12 }}>
-        {mode === "login" ? "Logg inn" : "Registrer"}
-      </h1>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button
-          type="button"
-          onClick={() => {
-            setMode("login");
-            setMsg("");
-          }}
-          disabled={busy}
-          style={{
-            padding: 8,
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background: mode === "login" ? "#f2f2f2" : "transparent",
-          }}
-        >
-          Login
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setMode("register");
-            setMsg("");
-          }}
-          disabled={busy}
-          style={{
-            padding: 8,
-            borderRadius: 10,
-            border: "1px solid #ccc",
-            background: mode === "register" ? "#f2f2f2" : "transparent",
-          }}
-        >
-          Register
-        </button>
+    <main style={cardStyle}>
+      <h1 style={{ fontSize: 28, marginBottom: 8 }}>{mode === "login" ? "Logg inn" : "Registrer"}</h1>
+      <div style={{ color: "#666", fontSize: 14, marginBottom: 16 }}>
+        {mode === "login" ? "Velkommen tilbake." : "Lag en bruker for å opprette og chatte på requests."}
       </div>
 
-      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
-        {/* ✅ NYTT: Navn (kun register) */}
-        {mode === "register" ? (
-          <label style={{ display: "grid", gap: 6 }}>
-            Navn
+      <div style={panelStyle}>
+        <div style={toggleWrap}>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("login");
+              setMsg("");
+            }}
+            disabled={busy}
+            style={toggleBtn(mode === "login")}
+          >
+            Login
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMode("register");
+              setMsg("");
+            }}
+            disabled={busy}
+            style={toggleBtn(mode === "register")}
+          >
+            Register
+          </button>
+        </div>
+
+        <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+          {mode === "register" ? (
+            <label style={labelStyle}>
+              Navn
+              <input
+                type="text"
+                required
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                autoComplete="name"
+                placeholder="F.eks. Jan Roger"
+                style={inputStyle}
+              />
+            </label>
+          ) : null}
+
+          <label style={labelStyle}>
+            E-post
             <input
-              type="text"
+              type="email"
               required
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              autoComplete="name"
-              placeholder="F.eks. Jan Roger"
-              style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
+              value={email}
+              onChange={(e) => setEmail(e.target.value.trim())}
+              autoComplete="email"
+              style={inputStyle}
             />
           </label>
-        ) : null}
 
-        <label style={{ display: "grid", gap: 6 }}>
-          E-post
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value.trim())}
-            autoComplete="email"
-            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
-          />
-        </label>
+          <label style={labelStyle}>
+            Passord
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              style={inputStyle}
+            />
+          </label>
 
-        <label style={{ display: "grid", gap: 6 }}>
-          Passord
-          <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
-            style={{ padding: 10, borderRadius: 8, border: "1px solid #ccc" }}
-          />
-        </label>
+          <button type="submit" disabled={busy} style={primaryBtn}>
+            {busy ? "Jobber..." : mode === "login" ? "Logg inn" : "Opprett bruker"}
+          </button>
 
-        <button
-          type="submit"
-          disabled={busy}
-          style={{
-            padding: 10,
-            borderRadius: 10,
-            border: "1px solid #111",
-            cursor: busy ? "not-allowed" : "pointer",
-          }}
-        >
-          {busy ? "Jobber..." : mode === "login" ? "Logg inn" : "Opprett bruker"}
-        </button>
+          {msg ? (
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid #ddd",
+                lineHeight: 1.4,
+                background:
+                  msgType === "error" ? "#fff5f5" : msgType === "success" ? "#f4fff6" : "#f7f7f7",
+              }}
+            >
+              <p style={{ margin: 0 }}>{msg}</p>
 
-        {msg ? (
-          <div
-            style={{
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              lineHeight: 1.4,
-            }}
-          >
-            <p style={{ margin: 0 }}>{msg}</p>
+              {mode === "login" && msgType === "info" ? (
+                <button
+                  type="button"
+                  onClick={resendConfirmation}
+                  disabled={busy}
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    borderRadius: 12,
+                    border: "1px solid #ccc",
+                    width: "100%",
+                    fontSize: 16,
+                  }}
+                >
+                  Send bekreftelsesmail på nytt
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </form>
 
-            {mode === "login" && msgType === "info" ? (
-              <button
-                type="button"
-                onClick={resendConfirmation}
-                disabled={busy}
-                style={{
-                  marginTop: 10,
-                  padding: 8,
-                  borderRadius: 10,
-                  border: "1px solid #ccc",
-                }}
-              >
-                Send bekreftelsesmail på nytt
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </form>
-
-      <p style={{ marginTop: 12 }}>
-        <a href="/forgot-password">Glemt passord?</a>
-      </p>
+        <div style={{ marginTop: 14 }}>
+          <a href="/forgot-password" style={{ display: "inline-block", padding: "10px 0" }}>
+            Glemt passord?
+          </a>
+        </div>
+      </div>
     </main>
   );
 }
