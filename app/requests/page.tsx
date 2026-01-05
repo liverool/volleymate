@@ -36,6 +36,12 @@ function fmt(iso: string | null) {
   }
 }
 
+function shortId(id: string | null | undefined) {
+  if (!id) return "-";
+  if (id.length <= 12) return id;
+  return `${id.slice(0, 6)}…${id.slice(-4)}`;
+}
+
 export default function RequestsPage() {
   const supabase = createClient();
   const router = useRouter();
@@ -209,9 +215,7 @@ export default function RequestsPage() {
         </button>
       </div>
 
-      {msg ? (
-        <div className="rounded-lg border p-3 text-sm whitespace-pre-wrap">{msg}</div>
-      ) : null}
+      {msg ? <div className="rounded-lg border p-3 text-sm whitespace-pre-wrap">{msg}</div> : null}
 
       {loading ? (
         <div className="text-sm opacity-70">Laster…</div>
@@ -235,13 +239,18 @@ export default function RequestsPage() {
                       {r.municipality ?? "Ukjent kommune"}
                       {r.location_text ? ` • ${r.location_text}` : ""}
                     </div>
+
                     <div className="text-sm opacity-70">
-                      Start: {fmt(r.start_time) || "-"} • Varighet:{" "}
-                      {r.duration_minutes ?? "-"} min
+                      Opprettet av:{" "}
+                      {r.user_id && meId && r.user_id === meId ? "Deg" : shortId(r.user_id)}
+                    </div>
+
+                    <div className="text-sm opacity-70">
+                      Start: {fmt(r.start_time) || "-"} • Varighet: {r.duration_minutes ?? "-"} min
                     </div>
                     <div className="text-sm opacity-70">
-                      Nivå: {(r.level_min ?? "-") + " – " + (r.level_max ?? "-")} •
-                      Type: {r.type ?? "-"}
+                      Nivå: {(r.level_min ?? "-") + " – " + (r.level_max ?? "-")} • Type:{" "}
+                      {r.type ?? "-"}
                     </div>
                   </div>
                   <div className="text-right">
@@ -249,6 +258,7 @@ export default function RequestsPage() {
                     <div className="text-xs opacity-60">{fmt(r.created_at)}</div>
                   </div>
                 </div>
+
                 {r.notes ? (
                   <div className="text-sm opacity-80 mt-3 line-clamp-2">{r.notes}</div>
                 ) : null}
@@ -272,13 +282,18 @@ export default function RequestsPage() {
                       {r.municipality ?? "Ukjent kommune"}
                       {r.location_text ? ` • ${r.location_text}` : ""}
                     </div>
+
                     <div className="text-sm opacity-70">
-                      Start: {fmt(r.start_time) || "-"} • Varighet:{" "}
-                      {r.duration_minutes ?? "-"} min
+                      Opprettet av:{" "}
+                      {r.user_id && meId && r.user_id === meId ? "Deg" : shortId(r.user_id)}
+                    </div>
+
+                    <div className="text-sm opacity-70">
+                      Start: {fmt(r.start_time) || "-"} • Varighet: {r.duration_minutes ?? "-"} min
                     </div>
                     <div className="text-sm opacity-70">
-                      Nivå: {(r.level_min ?? "-") + " – " + (r.level_max ?? "-")} •
-                      Type: {r.type ?? "-"}
+                      Nivå: {(r.level_min ?? "-") + " – " + (r.level_max ?? "-")} • Type:{" "}
+                      {r.type ?? "-"}
                     </div>
                   </div>
                   <div className="text-right">
@@ -286,6 +301,7 @@ export default function RequestsPage() {
                     <div className="text-xs opacity-60">{fmt(r.created_at)}</div>
                   </div>
                 </div>
+
                 {r.notes ? (
                   <div className="text-sm opacity-80 mt-3 line-clamp-2">{r.notes}</div>
                 ) : null}
