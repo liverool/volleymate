@@ -86,10 +86,7 @@ export default function RequestsPage() {
   async function loadProfilesForUserIds(userIds: string[]) {
     if (userIds.length === 0) return;
 
-    // Unik + fjern tomme
     const uniq = Array.from(new Set(userIds.filter(Boolean)));
-
-    // Supabase/PostgREST kan ha grenser på IN-lengde; chunker for safety.
     const batches = chunk(uniq, 100);
 
     const merged: Record<string, string> = {};
@@ -101,7 +98,6 @@ export default function RequestsPage() {
         .in("user_id", ids);
 
       if (error) {
-        // Ikke ødelegg sida – bare fallback til shortId
         setMsg((m) => m || `Kunne ikke hente navn (profiles): ${error.message}`);
         continue;
       }
@@ -113,7 +109,6 @@ export default function RequestsPage() {
       }
     }
 
-    // Merge inn i state
     setNameByUserId((prev) => ({ ...prev, ...merged }));
   }
 
@@ -139,7 +134,6 @@ export default function RequestsPage() {
 
     setMeId(user.id);
 
-    // ✅ Viktig: hold select enkel for å unngå 400 ved “kolonne finnes ikke”
     const baseSelect =
       "id,user_id,created_at,municipality,location_text,start_time,duration_minutes,level_min,level_max,type,notes,status";
 
@@ -159,7 +153,7 @@ export default function RequestsPage() {
       setMyRows(mineRows);
     }
 
-    // Åpne (ikke mine)
+    // Åpne
     const openRes = await supabase
       .from("requests")
       .select(baseSelect)
@@ -178,7 +172,6 @@ export default function RequestsPage() {
       setOpenRows(openFiltered);
     }
 
-    // 🔎 Hent navn for alle user_id vi viser
     const idsToFetch = [
       ...openFiltered.map((r) => r.user_id || ""),
       ...mineRows.map((r) => r.user_id || ""),
@@ -189,7 +182,6 @@ export default function RequestsPage() {
   }
 
   useEffect(() => {
-    // Les tab fra URL på klienten (uten useSearchParams)
     try {
       const sp = new URLSearchParams(window.location.search);
       const t = sp.get("tab");
@@ -234,8 +226,8 @@ export default function RequestsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="p-4 sm:p-6 space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Requests</h1>
           <div className="text-sm opacity-70">Åpne = meld interesse • Mine = administrer dine</div>
@@ -243,13 +235,13 @@ export default function RequestsPage() {
 
         <Link
           href="/requests/new"
-          className="rounded-lg bg-black text-white px-3 py-2 text-sm hover:opacity-90"
+          className="w-full sm:w-auto text-center rounded-lg bg-black text-white px-3 py-2 text-sm hover:opacity-90"
         >
           Ny request
         </Link>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setTabAndUrl("open")}
@@ -288,9 +280,9 @@ export default function RequestsPage() {
                 href={`/requests/${r.id}`}
                 className="block rounded-xl border p-4 hover:bg-black/5"
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="font-semibold">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="space-y-1 min-w-0">
+                    <div className="font-semibold truncate">
                       {r.municipality ?? "Ukjent kommune"}
                       {r.location_text ? ` • ${r.location_text}` : ""}
                     </div>
@@ -306,14 +298,14 @@ export default function RequestsPage() {
                     </div>
                   </div>
 
-                  <div className="text-right">
+                  <div className="sm:text-right flex sm:block items-center justify-between sm:justify-end gap-3">
                     <div className="text-sm font-medium">{r.status ?? "—"}</div>
                     <div className="text-xs opacity-60">{fmt(r.created_at)}</div>
                   </div>
                 </div>
 
                 {r.notes ? (
-                  <div className="text-sm opacity-80 mt-3 line-clamp-2">{r.notes}</div>
+                  <div className="text-sm opacity-80 mt-3 line-clamp-3 break-words">{r.notes}</div>
                 ) : null}
               </Link>
             ))}
@@ -329,9 +321,9 @@ export default function RequestsPage() {
           {myRows.map((r) => (
             <div key={r.id} className="rounded-xl border hover:bg-black/5">
               <Link href={`/requests/${r.id}`} className="block p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="font-semibold">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="space-y-1 min-w-0">
+                    <div className="font-semibold truncate">
                       {r.municipality ?? "Ukjent kommune"}
                       {r.location_text ? ` • ${r.location_text}` : ""}
                     </div>
@@ -347,18 +339,18 @@ export default function RequestsPage() {
                     </div>
                   </div>
 
-                  <div className="text-right">
+                  <div className="sm:text-right flex sm:block items-center justify-between sm:justify-end gap-3">
                     <div className="text-sm font-medium">{r.status ?? "—"}</div>
                     <div className="text-xs opacity-60">{fmt(r.created_at)}</div>
                   </div>
                 </div>
 
                 {r.notes ? (
-                  <div className="text-sm opacity-80 mt-3 line-clamp-2">{r.notes}</div>
+                  <div className="text-sm opacity-80 mt-3 line-clamp-3 break-words">{r.notes}</div>
                 ) : null}
               </Link>
 
-              <div className="flex items-center justify-end gap-2 px-4 pb-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 px-4 pb-4">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -366,7 +358,7 @@ export default function RequestsPage() {
                     e.stopPropagation();
                     router.push(`/requests/${r.id}`);
                   }}
-                  className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
+                  className="w-full sm:w-auto rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
                 >
                   Åpne
                 </button>
@@ -379,7 +371,7 @@ export default function RequestsPage() {
                     e.stopPropagation();
                     deleteRequest(r.id);
                   }}
-                  className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-50"
+                  className="w-full sm:w-auto rounded-lg border px-3 py-2 text-sm hover:bg-black/5 disabled:opacity-50"
                 >
                   {busyId === r.id ? "Sletter…" : "Slett"}
                 </button>
